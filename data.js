@@ -2,7 +2,7 @@
    Wer was lesen darf, regelt die Datenbank (Row Level Security) über "readers"/"public_read". */
 (function(){
   const cfg = window.KLECKS_CONFIG;
-  const sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, storageKey: 'klecks-auth' } });
+  const sb = window.supabase.createClient(cfg.url, cfg.key, { auth: { persistSession: true, storageKey: 'klecks-auth', lock: async (name, timeout, fn) => await fn() } });
 
   // Wer darf ein Dokument lesen? (Lehrkraft darf immer alles)
   function access(col, id, d){
@@ -77,7 +77,9 @@
     if(error) return { error: /invalid|credentials/i.test(error.message) ? 'Benutzername oder Passwort ist falsch.' : 'Anmeldung gerade nicht möglich. Bitte später nochmal versuchen.' };
     return { user: data.user };
   }
-  async function whoami(){
+  const within = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  async function whoami(){ try{ return await within(whoamiInner(), 8000); }catch(e){ try{ localStorage.removeItem('klecks-auth'); }catch(_){} return null; } }
+  async function whoamiInner(){
     const { data } = await sb.auth.getSession(); const u = data?.session?.user; if(!u) return null;
     const { data: r } = await sb.from('roles').select('role').eq('uid', u.id).maybeSingle();
     if(!r) return null;

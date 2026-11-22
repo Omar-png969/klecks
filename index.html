@@ -8,18 +8,21 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=8">
+<link rel="stylesheet" href="app.css?v=9">
 </head>
 <body>
-<div id="app"><div class="boot"><p>Klecks wird geladen …</p></div></div>
+<div id="app"><div class="boot"><p>Klecks wird geladen …</p><p id="boot-help" style="display:none;font-size:14px;max-width:340px;text-align:center">Dauert es zu lange? <a href="#" onclick="try{localStorage.removeItem('klecks-auth')}catch(e){};location.replace(location.pathname+'?r='+Date.now());return false">Hier tippen und neu laden</a></p><p id="boot-err" style="display:none;color:#b42318;font-size:13px;max-width:420px;text-align:center"></p></div></div>
+<script>
+setTimeout(function(){var h=document.getElementById('boot-help');if(h)h.style.display='block';},6000);
+window.addEventListener('error',function(e){var b=document.getElementById('boot-err');if(b){b.style.display='block';b.textContent='Fehler: '+(e.message||'Datei konnte nicht geladen werden')+' '+((e.filename||(e.target&&e.target.src)||'').split('/').pop());}},true);
+</script>
 <div id="modal"></div>
 <div id="player"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
-<script src="config.js?v=8"></script>
-<script src="data.js?v=8"></script>
-<script src="kurse.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="config.js?v=9"></script>
+<script src="data.js?v=9"></script>
+<script src="kurse.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
-

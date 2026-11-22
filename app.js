@@ -818,4 +818,408 @@ M.course = d => {
         else if(q.type==='mc' || !q.type) inner = '<div class="tiny muted" style="font-weight:700">Antworten – richtige ankreuzen</div>'+[0,1,2,3].map(oi=>'<div class="optrow"><input type="radio" name="r'+qi+'" data-k="'+qb+'.answer" value="'+oi+'" '+(Number(q.answer)===oi?'checked':'')+' aria-label="Antwort '+(oi+1)+' ist richtig">'+inp(qb+'.options.'+oi, (q.options||[])[oi], 'placeholder="Antwort '+(oi+1)+(oi>1?' (optional)':'')+'"')+'</div>').join('');
         else inner = '<p class="muted small">Spezialaufgabe ('+esc(q.type)+') – wird unverändert übernommen.</p>';
         return '<div class="qed"><div class="qed-h"><span>Aufgabe '+(qi+1)+'</span><div class="row"><div class="seg">'+types.map(([k,n])=>'<button type="button" class="'+((q.type||'mc')===k?'on':'')+'" data-a="segSet" data-k="'+qb+'.type" data-v="'+k+'">'+n+'</button>').join('')+'</div><button type="button" class="btn flat sm icon" data-a="rmQ" data-i="'+qi+'" aria-label="Aufgabe löschen">'+ic('trash')+'</button></div></div>'+
-          ta(qb+'.q', q.q, 'placeholder="Arbeitsauftrag, z. B. „Berechne den Flächeni
+          ta(qb+'.q', q.q, 'placeholder="Arbeitsauftrag, z. B. „Berechne den Flächeninhalt.“" style="min-height:56px"')+inner+inp(qb+'.hint', q.hint, 'placeholder="Tipp bei falscher Antwort (optional)"')+'</div>'; }).join('')+
+      '<button type="button" class="btn ghost" data-a="addQ">'+ic('plus')+'Aufgabe hinzufügen</button>',
+      foot:'<button class="btn primary" data-a="lessonDone">Fertig</button>' };
+  }
+  return { title: d.id?'Kurs bearbeiten':'Neuer Kurs', wide:true, body:
+    fld('Titel', inp('title', d.title, 'placeholder="z. B. Flächeninhalt und Umfang" autofocus'))+fld('Kurzbeschreibung', inp('desc', d.desc, 'placeholder="Worum geht es?"'))+
+    '<div class="two">'+fld('Fach', segF('fach', d.fach, FAECHER))+fld('Klasse', segF('klasse', d.klasse, ['5','6','7','8','alle']))+'</div>'+
+    fld('Nur für bestimmte Schüler? (optional)', studPick('studentIds', d.studentIds), 'Leer = alle Schüler der gewählten Klasse.')+
+    '<label class="toggle"><input type="checkbox" data-k="draft" '+(d.draft?'checked':'')+'> Entwurf (für Schüler noch unsichtbar)</label>'+
+    '<div><h3 style="margin-bottom:8px">Arbeitsblätter</h3><div class="stack" style="gap:8px">'+d.lessons.map((l,i)=>'<div class="les"><span class="dbox" style="background:'+(l.test?'var(--teal)':fcov(d.fach))+';width:36px;height:40px"><b style="font-size:14px">'+(l.test?'T':i+1)+'</b></span><span class="grow">'+esc(l.title||'Ohne Titel')+'<br><span class="muted tiny">'+l.questions.length+' Aufgaben</span></span><button type="button" class="btn flat sm icon" data-a="mvL" data-i="'+i+'" data-n="-1" aria-label="Nach oben">↑</button><button type="button" class="btn flat sm icon" data-a="editL" data-i="'+i+'" aria-label="Bearbeiten">'+ic('edit')+'</button><button type="button" class="btn flat sm icon" data-a="rmL" data-i="'+i+'" aria-label="Löschen">'+ic('trash')+'</button></div>').join('')+'</div>'+
+    '<button type="button" class="btn ghost" style="margin-top:10px" data-a="addL">'+ic('plus')+'Arbeitsblatt hinzufügen</button></div>',
+    foot:(d.id?'<button class="btn ghost" data-a="delCourse">'+ic('trash')+'Löschen</button><span class="sp"></span>':'')+'<button class="btn ghost" data-a="closeM">Abbrechen</button><button class="btn primary" data-a="saveCourse">Speichern</button>' };
+};
+
+/* ---------- Formular-Bindung ---------- */
+function setPath(o, path, v){ const ks = path.split('.'); let t = o; for(let i=0;i<ks.length-1;i++){ const k = ks[i]; if(t[k]==null) t[k] = /^\d+$/.test(ks[i+1]) ? [] : {}; t = t[k]; } t[ks[ks.length-1]] = v; }
+function getPath(o, path){ return path.split('.').reduce((t,k)=>t==null?t:t[k], o); }
+document.addEventListener('input', e => {
+  const el = e.target;
+  if(el.id==='q'){ S.ui.q = el.value; render(); return; }
+  if(el.id==='chat-in'){ S.chat.draft[S.ui.chat] = el.value; grow(el); return; }
+  if(el.classList.contains('ln') || el.id==='p-in'){ pInput(el); return; }
+  const k = el.dataset?.k; if(!k || !S.m) return;
+  setPath(S.m.d, k, el.type==='checkbox' ? el.checked : el.type==='radio' ? Number(el.value) : el.value);
+  if(el.dataset.rerender) rerenderM();
+});
+document.addEventListener('change', e => {
+  const el = e.target;
+  if(el.dataset?.k && S.m && (el.type==='checkbox' || el.type==='radio' || el.tagName==='SELECT')){ setPath(S.m.d, el.dataset.k, el.type==='checkbox'?el.checked:el.type==='radio'?Number(el.value):el.value); if(el.dataset.rerender) rerenderM(); }
+  if(el.dataset?.a==='studFilter'){ S.ui.stud = el.value; render(); }
+  if(el.dataset?.a==='upload') upload(el.files);
+  if(el.dataset?.a==='chatUpload'){ chatUpload([...el.files]); el.value=''; }
+});
+async function upload(files){
+  if(!files?.length) return; S.m.d.uploading = true; rerenderM();
+  for(const f of files){ if(f.size > 20*1024*1024){ toast(f.name+' ist größer als 20 MB.'); continue; } try{ (S.m.d.files ||= []).push(await KD.uploadFile(f)); }catch(e){ toast('Upload fehlgeschlagen: '+f.name); } }
+  if(S.m){ S.m.d.uploading = false; rerenderM(); }
+}
+
+/* =====================================================================
+   ARBEITSBLATT-PLAYER
+   ===================================================================== */
+function shuffle(a){ a = a.slice(); for(let i=a.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]] = [a[j],a[i]]; } return a; }
+function gapParts(text){ const out = []; const re = /\[\[(.+?)\]\]/g; let last = 0, m; const s = String(text||''); while((m = re.exec(s))){ if(m.index>last) out.push({t:s.slice(last,m.index)}); out.push({ans:m[1].split('|')}); last = re.lastIndex; } if(last<s.length) out.push({t:s.slice(last)}); return out; }
+const normLoose = s => String(s??'').trim().replace(/\s+/g,' ').replace(/,/g,'.').replace(/[.!?]$/,'').toLowerCase();
+const normCase = s => String(s??'').trim().replace(/\s+/g,' ').replace(/,/g,'.').replace(/[.!?]$/,'');
+const normNum = s => normLoose(s).replace(/(\d)\s+(?=\d)/g,'$1').replace(/\s*(cm²|m²|mm²|dm²|km²|cm|mm|dm|km|m|kg|g|t|€|ct|min|h|s|°)$/,' $1').trim();
+function matchAns(val, alts, cs){
+  const v = cs ? normCase(val) : normLoose(val);
+  return alts.some(a => { const x = cs ? normCase(a) : normLoose(a); return v===x || normNum(val)===normNum(a) && !cs || (cs && /^[\d.,\s]+[a-zäöü²°€]*$/i.test(a) && normNum(val)===normNum(a)); });
+}
+function renderMerk(text){
+  if(!text) return '';
+  const bold = s => esc(s).replace(/\*\*(.+?)\*\*/g,'<em>$1</em>');
+  const lines = String(text).split('\n');
+  let html = '', para = [];
+  const flush = () => { if(para.length){ html += '<p>'+para.map(bold).join('<br>')+'</p>'; para = []; } };
+  lines.forEach(l => { const t = l.trim(); if(!t){ flush(); return; }
+    if(t.startsWith('# ')){ flush(); html += '<h4>'+bold(t.slice(2))+'</h4>'; }
+    else if(/^[•\-*] /.test(t)){ flush(); html += '<div class="bul"><span>'+bold(t.slice(2))+'</span></div>'; }
+    else if(t.startsWith('> ')){ flush(); html += '<div class="bsp">'+bold(t.slice(2))+'</div>'; }
+    else para.push(t); });
+  flush();
+  return '<div class="merk">'+(/^#\s/.test(String(text).trim())?'':'<h4>Merke</h4>')+html+'</div>';
+}
+function startLesson(ci, li){
+  const c = byId('courses',ci); const l = c?.lessons?.[li]; if(!l) return;
+  const qs = (l.questions||[]).filter(q=>q.q||q.text||q.items).map(q => {
+    const x = {...q, type:q.type||'mc'};
+    if(x.type==='mc') x.opts = (x.noShuffle ? (q.options||[]).map((t,i)=>({t,i})) : shuffle((q.options||[]).map((t,i)=>({t,i})))).filter(o=>String(o.t??'').trim());
+    if(x.type==='tf' && !x.items && x.tfText) x.items = parseTf(x.tfText);
+    if(x.type==='sort') x.itemsS = shuffle((x.items||[]).map((it,i)=>({...it, i})));
+    if(x.type==='order') x.itemsS = shuffle((x.items||[]).map((t,i)=>({t, i})));
+    return x; });
+  const max = qs.reduce((a,q)=>a+pts(q),0);
+  S.p = {c, l, li, qs, i:0, phase: l.intro ? 'intro' : 'q', ans:{}, got:0, max, wrong:[], res:null};
+  renderP();
+}
+const parseTf = txt => String(txt||'').split('\n').map(s=>s.trim()).filter(Boolean).map(s=>({a:/^r\s*:/i.test(s), t:s.replace(/^[rf]\s*:\s*/i,'')}));
+function pInput(el){ const p = S.p; if(!p) return; if(el.id==='p-in') p.ans.v = el.value; else { (p.ans.g ||= {})[el.dataset.g] = el.value; } const b = $('[data-a=pCheck]'); if(b) b.disabled = !canCheck(); }
+function canCheck(){ const p = S.p, q = p.qs[p.i], a = p.ans;
+  if(q.type==='mc') return a.sel!=null;
+  if(q.type==='input') return String(a.v||'').trim()!=='';
+  if(q.type==='gap') { const n = gapParts(q.text).filter(x=>x.ans).length; return Object.values(a.g||{}).filter(v=>String(v).trim()).length===n; }
+  if(q.type==='tf') return Object.keys(a.tf||{}).length===(q.items||[]).length;
+  if(q.type==='sort') return Object.keys(a.so||{}).length===(q.items||[]).length;
+  if(q.type==='order') return (a.ord||[]).length===(q.items||[]).length;
+  return true; }
+function checkAnswer(){
+  const p = S.p, q = p.qs[p.i], a = p.ans; let got = 0, max = pts(q); const res = {};
+  if(q.type==='mc'){ got = a.sel===Number(q.answer) ? 1 : 0; }
+  else if(q.type==='input'){ got = matchAns(a.v, String(q.answer||'').split('|'), !!q.cs) ? 1 : 0; }
+  else if(q.type==='gap'){ let gi = 0; res.g = {}; gapParts(q.text).forEach(x=>{ if(!x.ans) return; const ok = matchAns((a.g||{})[gi], x.ans, q.cs!==false); res.g[gi] = ok; if(ok) got++; gi++; }); }
+  else if(q.type==='tf'){ res.tf = {}; (q.items||[]).forEach((it,i)=>{ const ok = a.tf[i]===!!it.a; res.tf[i] = ok; if(ok) got++; }); }
+  else if(q.type==='sort'){ res.so = {}; (q.items||[]).forEach((it,i)=>{ const ok = Number(a.so[i])===Number(it.c); res.so[i] = ok; if(ok) got++; }); }
+  else if(q.type==='order'){ got = (a.ord||[]).every((v,i)=>v===i) ? 1 : 0; }
+  p.res = {got, max, ...res}; p.got += got; if(got<max) p.wrong.push(p.i); p.phase = 'fb'; renderP();
+}
+async function finishLesson(){
+  const p = S.p; const pct = p.max ? p.got/p.max : 0;
+  const st = pct>=.9?3:pct>=.7?2:pct>=.4?1:0;
+  p.phase = 'end'; p.stars = st; p.xp = p.got*5; p.pct = Math.round(pct*100);
+  if(!isTeacher()){
+    const sid = S.session.id, old = prog(sid), key = lessonKey(p.c,p.l);
+    const prev = old.stars?.[key]||0; if(st===3 && prev<3) p.xp += 20;
+    const wk = weekKey(), t = today(); const days = [...new Set([...(old.days||[]), t])].sort().slice(-40);
+    const body = { xp:(old.xp||0)+p.xp, stars:{...(old.stars||{}), [key]:Math.max(prev,st)}, best:{...(old.best||{}), [key]:Math.max(old.best?.[key]||0, p.pct)}, plays:(old.plays||0)+1, lastActive:Date.now(), weekKey:wk, weekXp:(old.weekKey===wk?(old.weekXp||0):0)+p.xp, days };
+    await save('progress', sid, body);
+    if(p.l.test || st===3 && prev<3) notify('teacher', me().name+(p.l.test?' hat den Test „'+p.c.title+'“ mit '+p.pct+'% abgeschlossen':' hat „'+p.l.title+'“ mit 3 Sternen geschafft'), 'fortschritt', 'course');
+  }
+  renderP();
+}
+function taskBody(q, fb){
+  const p = S.p, a = p.ans, r = p.res || {};
+  if(q.type==='mc') return '<div class="opts">'+q.opts.map(o=>{ let cls=''; if(fb){ if(o.i===Number(q.answer)) cls='right'; else if(o.i===a.sel) cls='wrong'; } else if(o.i===a.sel) cls='sel'; return '<button class="opt '+cls+'" data-a="pSel" data-i="'+o.i+'" '+(fb?'disabled':'')+'>'+esc(o.t)+'</button>'; }).join('')+'</div>';
+  if(q.type==='input') return '<input class="big-in" id="p-in" value="'+esc(a.v||'')+'" '+(fb?'disabled':'')+' placeholder="Deine Antwort" autocomplete="off" autocapitalize="off" autofocus>';
+  if(q.type==='gap'){ let gi = 0; return '<div class="gap-text">'+gapParts(q.text).map(x=>{ if(!x.ans) return esc(x.t); const i = gi++; const ok = r.g?.[i]; const w = Math.max(5, Math.min(18, x.ans[0].length+2));
+      return '<input class="ln '+(fb?(ok?'right':'wrong'):'')+'" data-g="'+i+'" value="'+esc((a.g||{})[i]||'')+'" style="width:'+w+'ch" '+(fb?'disabled':'')+' autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Lücke '+(i+1)+'">'+(fb&&!ok?'<span class="fix">'+esc(x.ans[0])+'</span>':''); }).join('')+'</div>'; }
+  if(q.type==='tf') return '<div class="tf">'+(q.items||[]).map((it,i)=>'<div class="tf-row '+(fb?(r.tf[i]?'right':'wrong'):'')+'"><span>'+esc(it.t)+'</span><div class="seg2"><button class="'+(a.tf?.[i]===true?'on':'')+'" data-a="pTf" data-i="'+i+'" data-v="1" '+(fb?'disabled':'')+'>richtig</button><button class="'+(a.tf?.[i]===false?'on':'')+'" data-a="pTf" data-i="'+i+'" data-v="0" '+(fb?'disabled':'')+'>falsch</button></div></div>').join('')+'</div>';
+  if(q.type==='sort') return '<div class="sort'+((q.cats||[]).length>3?' many':'')+'">'+q.itemsS.map(it=>'<div class="sort-row '+(fb?(r.so[it.i]?'right':'wrong'):'')+'"><b>'+esc(it.t)+(fb&&!r.so[it.i]?' <span class="fix">→ '+esc(q.cats[it.c])+'</span>':'')+'</b><div class="seg2">'+q.cats.map((c,ci)=>'<button class="'+(Number(a.so?.[it.i])===ci && a.so?.[it.i]!=null?'on':'')+'" data-a="pSort" data-i="'+it.i+'" data-v="'+ci+'" '+(fb?'disabled':'')+'>'+esc(c)+'</button>').join('')+'</div></div>').join('')+'</div>';
+  if(q.type==='order'){ const ord = a.ord||[]; return '<div class="order">'+q.itemsS.map(it=>{ const pos = ord.indexOf(it.i); return '<button class="ord '+(pos>=0?'picked':'')+'" data-a="pOrd" data-i="'+it.i+'" '+(fb?'disabled':'')+'><span class="on" style="'+(pos<0?'background:#d5dbe0':'')+'">'+(pos>=0?pos+1:'')+'</span>'+esc(it.t)+(fb?' <span class="fix">('+(it.i+1)+')</span>':'')+'</button>'; }).join('')+'</div>'+(ord.length&&!fb?'<button class="btn ghost sm" data-a="pOrdReset">Neu ordnen</button>':''); }
+  return '';
+}
+function taskHead(q,i){ const m = String(q.q||'').match(/^Aufgabe (\w+):\s*/); return '<span class="n">'+(m?m[1]:i+1)+'.</span><span class="task-q">'+esc(m?q.q.slice(m[0].length):(q.q||''))+'</span>'; }
+function renderP(){
+  const p = S.p, el = $('#player'); if(!p){ el.innerHTML = ''; document.body.style.overflow=''; return; }
+  document.body.style.overflow = 'hidden';
+  const total = p.qs.length; const progress = p.phase==='end' ? 100 : p.phase==='intro' ? 0 : (p.i + (p.phase==='fb'?1:0))/Math.max(1,total)*100;
+  const isTest = p.l.test;
+  const head = '<div class="ws-h"><div><div class="tiny" style="color:#3a8aa4;font-weight:700">'+esc(p.c.fach)+' · '+esc(p.c.title)+'</div><h2>'+esc(p.l.title)+'</h2></div><div class="brand">'+logo(20)+'KLECKS</div></div>';
+  let main = '', foot = '', fcls = '';
+  if(p.phase==='intro'){
+    main = '<div class="ws">'+head+renderMerk(p.l.intro)+'<p style="font-size:14px;color:#6b7280">'+total+' Aufgaben · '+p.max+' Punkte'+(isTest?' · Test':'')+'</p></div>';
+    foot = '<div class="p-fb muted">Lies den Merkkasten in Ruhe durch.</div><button class="btn primary" data-a="pStart" autofocus>Los geht’s '+ic('next')+'</button>';
+  } else if(p.phase==='end'){
+    const msg = p.stars===3?'Prima!':p.stars===2?'Gut gemacht!':p.stars===1?'Ordentlich!':'Übe weiter!';
+    const band = p.pct>=90?0:p.pct>=70?1:2;
+    main = '<div class="ws"><div class="p-end"><div class="big-stars">'+[0,1,2].map(i=>star(i<p.stars)).join('')+'</div><h1>'+msg+'</h1><p style="font-size:18px;font-weight:700">'+p.got+' von '+p.max+' Punkten · '+p.pct+'%</p>'+(p.l.noten?'<p style="font-size:22px;font-weight:800;color:#0d5468">Note '+(1+p.l.noten.filter(x=>p.got/p.max*100<x).length)+'</p>':'')+(isTeacher()?'<p class="muted small">Vorschau – wird nicht gespeichert</p>':'<span class="chip acc" style="font-size:14px;padding:5px 12px">'+ic('bolt')+'+'+p.xp+' Punkte</span>')+
+      (p.l.noten?'':'<div class="score"><div class="'+(band===0?'on':'')+'">90–100 %<br>Prima</div><div class="'+(band===1?'on':'')+'">70–89 %<br>Gut gemacht</div><div class="'+(band===2?'on':'')+'">unter 70 %<br>Übe weiter</div></div>')+
+      (p.wrong.length?'<div class="hint" style="text-align:left;width:100%">Schau dir diese Aufgaben nochmal an:<br>'+p.wrong.map(i=>'• '+(/^Aufgabe /.test(p.qs[i].q||'')?esc(short(p.qs[i].q,80)):'Aufgabe '+(i+1)+': '+esc(short(p.qs[i].q,70)))).join('<br>')+'</div>':'')+'</div></div>';
+    foot = '<button class="btn ghost" data-a="pRetry">'+ic('refresh')+'Nochmal</button><span class="sp"></span>'+(p.c.lessons[p.li+1]?'<button class="btn primary" data-a="pNext">Nächstes Blatt '+ic('next')+'</button>':'<button class="btn primary" data-a="pClose">Fertig</button>');
+  } else {
+    const q = p.qs[p.i], fb = p.phase==='fb';
+    main = '<div class="ws">'+head+(p.i===0||fb?'':'')+'<div class="task"><div class="task-n">'+taskHead(q,p.i)+'</div>'+taskBody(q,fb)+'</div>'+(p.l.intro?'<details><summary class="tiny" style="cursor:pointer;color:#3a8aa4;font-weight:700">Merkkasten anzeigen</summary>'+renderMerk(p.l.intro)+'</details>':'')+'</div>';
+    if(fb){ const r = p.res; const all = r.got===r.max, none = r.got===0;
+      fcls = all?'right':none?'wrong':'part';
+      let sol = '';
+      if(!all && q.type==='mc') sol = 'Richtig ist: '+esc((q.options||[])[Number(q.answer)]);
+      if(!all && q.type==='input') sol = 'Richtig ist: '+esc(String(q.answer).split('|')[0]);
+      if(!all && q.type==='order') sol = 'Richtige Reihenfolge: '+(q.items||[]).map((t,i)=>(i+1)+'. '+esc(short(t,30))).join('  ');
+      foot = '<div class="p-fb"><b>'+(all?'Richtig! +'+r.got:none?'Nicht ganz':r.got+' von '+r.max+' richtig')+'</b>'+sol+(q.hint&&!all?'<div class="small" style="margin-top:3px">'+esc(q.hint)+'</div>':'')+'</div><button class="btn '+(all?'ok':'primary')+'" data-a="pCont" autofocus>Weiter</button>';
+    } else foot = '<div class="p-fb muted">Aufgabe '+(p.i+1)+' von '+total+'</div><button class="btn primary" data-a="pCheck" '+(canCheck()?'':'disabled')+'>Prüfen</button>';
+  }
+  el.innerHTML = '<div class="play"><div class="p-top"><button class="btn flat icon" data-a="pClose" aria-label="Beenden">'+ic('x')+'</button><div class="bar"><i style="width:'+progress+'%"></i></div><span class="p-pts">'+p.got+' / '+p.max+' P.</span></div><div class="p-main">'+main+'</div><div class="p-foot '+fcls+'"><div class="p-foot-in">'+foot+'</div></div></div>';
+  const af = el.querySelector('[autofocus]') || el.querySelector('.ln:not([disabled])'); if(af && p.phase!=='intro') af.focus(); else if(af) af.focus();
+}
+document.addEventListener('keydown', e => {
+  if(e.key==='Escape'){ if(S.m) closeM(); else if(S.ui.q){ S.ui.q=''; render(); } return; }
+  if(e.key==='Enter' && e.target.id==='chat-in' && !e.shiftKey && !matchMedia('(pointer:coarse)').matches){ e.preventDefault(); A.chatSend(); return; }
+  if(!S.p || e.key!=='Enter') return;
+  if(e.target.id==='p-in' || e.target.classList?.contains('ln')){ e.preventDefault(); if(S.p.phase==='q' && canCheck()) checkAnswer(); else if(S.p.phase==='fb') pCont(); else if(e.target.classList.contains('ln')){ const n = e.target.parentElement.querySelector('.ln[data-g="'+(Number(e.target.dataset.g)+1)+'"]'); n?.focus(); } }
+});
+function pCont(){ const p = S.p; p.i++; p.ans = {}; p.res = null; if(p.i>=p.qs.length) finishLesson(); else { p.phase = 'q'; renderP(); $('.p-main')?.scrollTo(0,0); } }
+
+/* =====================================================================
+   AKTIONEN
+   ===================================================================== */
+const A = {};
+A.noop = () => {};
+A.pwShow = el => { const i = el.previousElementSibling; i.type = i.type==='password' ? 'text' : 'password'; el.textContent = i.type==='password' ? 'Zeigen' : 'Verbergen'; };
+A.logout = () => logout();
+A.menu = () => openM('menu');
+A.theme = () => { const next = isDark() ? 'light' : 'dark'; document.documentElement.dataset.theme = next; pref('theme', next); render(); };
+A.clearQ = () => { S.ui.q = ''; };
+A.settings = () => openM('settings', {teacherName:set().teacherName||'', pw:'', pw2:''});
+A.saveSettings = async () => { const d = S.m.d;
+  if(d.pw){ if(d.pw.length<8) return toast('Das Passwort braucht mindestens 8 Zeichen.'); if(d.pw!==d.pw2) return toast('Die Passwörter stimmen nicht überein.'); try{ await KD.changeOwnPassword(d.pw); }catch(e){ return toast('Passwort konnte nicht geändert werden.'); } }
+  if(isTeacher() && !await save('settings','main',{...strip(set()), teacherName:d.teacherName.trim()})) return;
+  closeM(); toast(d.pw?'Gespeichert – neues Passwort aktiv':'Gespeichert'); };
+A.notifs = async () => { const ra = readAt(); openM('notifs', {readAt:ra}); if(myNotifs().some(n=>n.at>ra)){ try{ await S.db.collection('notifread').doc(myKey()).set({at:Date.now()}); }catch(e){} } };
+A.closeM = () => closeM();
+A.ovClose = (el, ev) => { if(ev.target===el) closeM(); };
+A.startTab = el => { S.ui.startTab = el.dataset.t; render(); };
+A.mappe = el => { S.ui.mappe = el.dataset.k; render(); };
+A.fach = el => { S.ui.fach = el.dataset.f; if(S.route!=='kurse') location.hash = 'kurse'; else render(); };
+A.klasse = el => { S.ui.klasse = el.dataset.k; render(); };
+A.hwTab = el => { S.ui.hwTab = el.dataset.t; render(); };
+A.ftype = el => { S.ui.ftype = el.dataset.t; render(); };
+A.goKurse = () => { location.hash = 'kurse'; };
+A.segSet = el => { const k = el.dataset.k; if(k.endsWith('.type') && getPath(S.m.d,k)!==el.dataset.v){ const base = k.replace(/\.type$/,''); setPath(S.m.d, base+'.answer', el.dataset.v==='mc'?0:''); } setPath(S.m.d, k, el.dataset.v); rerenderM(); };
+A.multiToggle = el => { const k = el.dataset.k, v = el.dataset.v; const arr = getPath(S.m.d,k) || []; setPath(S.m.d, k, arr.includes(v) ? arr.filter(x=>x!==v) : [...arr, v]); rerenderM(); };
+A.multiGroup = el => { const k = el.dataset.k; const ids = el.dataset.ids.split(','); const arr = getPath(S.m.d,k)||[]; const all = ids.every(id=>arr.includes(id)); setPath(S.m.d, k, all ? arr.filter(x=>!ids.includes(x)) : [...new Set([...arr, ...ids])]); rerenderM(); };
+A.renameFile = (el, ev) => { ev.stopPropagation(); const doc = byId(el.dataset.c, el.dataset.id); const f = doc?.files?.[Number(el.dataset.i)]; if(f) openM('rename', {c:el.dataset.c, id:el.dataset.id, i:Number(el.dataset.i), name:f.name}); };
+A.saveRename = async () => { const d = S.m.d; const name = String(d.name||'').trim(); if(!name) return toast('Bitte einen Namen eingeben.');
+  const doc = byId(d.c, d.id); if(!doc) return closeM(); const path = doc.files?.[d.i]?.path;
+  if(await syncNames({[path]:name})){ closeM(); toast('Umbenannt – überall aktualisiert'); } };
+/* Gleicher Dateiname überall: Kursmappe, Hausaufgaben, Nachrichten */
+async function syncNames(map){
+  const paths = Object.keys(map).filter(Boolean); if(!paths.length) return true;
+  for(const c of ['entries','homework','msgs']){
+    for(const doc of (data(c)||[])){
+      if(!(doc.files||[]).some(f=>paths.includes(f.path) && f.name!==map[f.path])) continue;
+      const files = doc.files.map(f=>paths.includes(f.path) ? {...f, name:map[f.path]} : f);
+      if(!await save(c, doc.id, {...strip(doc), files})) return false;
+    }
+  }
+  return true;
+}
+A.rmFile = el => { S.m.d.files.splice(Number(el.dataset.i),1); rerenderM(); };
+A.confirmYes = async () => { const fn = S.m.d.onYes; closeM(); if(fn) await fn(); };
+function ask(title, text, onYes, yes){ openM('confirm', {title, text, onYes, yes}); }
+A.openFile = async el => { const p = el.dataset.p; if(!p) return; const w = window.open('', '_blank'); try{ const url = await KD.fileUrl(p); if(w) w.location = url; else location.href = url; }catch(e){ if(w) w.close(); toast('Datei konnte nicht geöffnet werden.'); } };
+const preIds = el => el?.dataset?.ids ? el.dataset.ids.split(',').filter(Boolean) : (students().length===1?[students()[0].id]:[]);
+
+/* Stunden */
+A.newEntry = el => openM('entry', {date:today(), faecher:['Mathe'], studentIds:preIds(el), thema:'', inhalt:'', files:[], attendance:{}, hwOn:false, hwPer:false, hwText:'', hwTexts:{}, hwDue:addDays(today(),7), oldHw:[]});
+A.editEntry = el => { const e = byId('entries', el.dataset.id); const hws = hwIdsOf(e).map(id=>byId('homework',id)).filter(Boolean);
+  const per = hws.length>1 || (hws.length===1 && hws[0].studentIds.length===1 && (e.studentIds||[]).length>1);
+  const texts = {}; if(per) hws.forEach(h=>texts[h.studentIds[0]] = h.text);
+  openM('entry', {id:e.id, date:e.date, faecher:[...entryFaecher(e)], studentIds:[...(e.studentIds||[])], thema:e.thema, inhalt:e.inhalt||'', files:[...(e.files||[])], attendance:{...(e.attendance||{})}, hwOn:!!hws.length, hwPer:per, hwText:per?'':(hws[0]?.text||''), hwTexts:texts, hwDue:hws[0]?.due||addDays(e.date,7), oldHw:hws.map(h=>h.id), createdAt:e.createdAt}); };
+A.saveEntry = async () => {
+  const d = S.m.d;
+  if(!d.thema.trim()) return toast('Bitte ein Thema eintragen.');
+  if(!d.studentIds.length) return toast('Bitte mindestens einen Schüler auswählen.');
+  const per = d.hwOn && d.hwPer && d.studentIds.length>1;
+  if(d.hwOn && !per && !String(d.hwText||'').trim()) return toast('Bitte die Hausaufgabe beschreiben.');
+  if(per){ const miss = d.studentIds.find(id=>!String((d.hwTexts||{})[id]||'').trim()); if(miss) return toast('Bitte die Aufgabe für '+byId('students',miss)?.name+' eintragen.'); }
+  const id = d.id || uid(); const isNew = !d.id; const hwFach = d.faecher[0] || '';
+  const old = (d.oldHw||[]).map(h=>byId('homework',h)).filter(Boolean);
+  const want = !d.hwOn ? [] : per ? d.studentIds.map(sid=>({ids:[sid], text:d.hwTexts[sid].trim()})) : [{ids:d.studentIds, text:d.hwText.trim()}];
+  const used = new Set(), hwIds = [];
+  for(const w of want){ const reuse = old.find(h=>!used.has(h.id) && (per ? h.studentIds.length===1 && h.studentIds[0]===w.ids[0] : true)); const hid = reuse?.id || uid(); used.add(hid);
+    if(!await save('homework', hid, {fach:hwFach, studentIds:w.ids, text:w.text, due:d.hwDue||addDays(d.date,7), files:reuse?.files||[], entryId:id, createdAt:reuse?.createdAt||Date.now()})) return;
+    hwIds.push(hid); await notifyMany(w.ids.filter(x=>!(reuse?.studentIds||[]).includes(x)), 'Neue Hausaufgabe bis '+fmt(d.hwDue), 'aufgaben', 'hw'); }
+  for(const h of old) if(!used.has(h.id)) await del('homework', h.id);
+  const att = {}; d.studentIds.forEach(sid=>att[sid] = d.attendance?.[sid]||'da');
+  if(!await save('entries', id, {date:d.date||today(), fach:d.faecher[0]||'', faecher:d.faecher, studentIds:d.studentIds, thema:d.thema.trim(), inhalt:d.inhalt.trim(), files:(d.files||[]).map(f=>({...f, name:String(f.name||'').trim()||'Datei'})), attendance:att, hwIds, createdAt:d.createdAt||Date.now()})) return;
+  await syncNames(Object.fromEntries((d.files||[]).map(f=>[f.path, String(f.name||'').trim()||'Datei'])));
+  if(isNew) await notifyMany(d.studentIds, 'Neue Stunde in der Kursmappe: '+d.thema.trim(), 'kursmappe', 'entry');
+  closeM(); toast('Stunde gespeichert');
+};
+A.delEntry = () => { const d = S.m.d; ask('Stunde löschen?', 'Der Eintrag „'+d.thema+'“ wird gelöscht. Hausaufgaben bleiben erhalten.', async()=>{ if(await del('entries', d.id)) toast('Gelöscht'); }); };
+
+/* Hausaufgaben */
+A.newHw = el => openM('hw', {fach:'Mathe', studentIds:preIds(el), text:'', texts:{}, per:false, due:addDays(today(),7), files:[]});
+A.newHwFor = el => openM('hw', {fach:byId('students',el.dataset.id)?.faecher?.[0]||'Mathe', studentIds:[el.dataset.id], text:'', texts:{}, per:false, due:addDays(today(),7), files:[]});
+A.editHw = el => { const h = byId('homework', el.dataset.id); openM('hw', {id:h.id, fach:h.fach, studentIds:[...h.studentIds], text:h.text, due:h.due, files:[...(h.files||[])], entryId:h.entryId||null, createdAt:h.createdAt}); };
+A.saveHw = async () => { const d = S.m.d;
+  if(!d.studentIds.length) return toast('Bitte mindestens einen Schüler auswählen.');
+  if(d.per && !d.id && d.studentIds.length>1){ const miss = d.studentIds.find(id=>!String((d.texts||{})[id]||'').trim()); if(miss) return toast('Bitte die Aufgabe für '+byId('students',miss)?.name+' eintragen.');
+    for(const sid of d.studentIds){ if(!await save('homework', uid(), {fach:d.fach, studentIds:[sid], text:d.texts[sid].trim(), due:d.due||addDays(today(),7), files:d.files||[], entryId:null, createdAt:Date.now()})) return; await notify(sid, 'Neue Hausaufgabe bis '+fmt(d.due), 'aufgaben', 'hw'); }
+    closeM(); toast(d.studentIds.length+' Hausaufgaben verteilt'); return; }
+  if(!String(d.text||'').trim()) return toast('Bitte die Aufgabe beschreiben.');
+  const id = d.id || uid(); const prev = d.id ? byId('homework', d.id) : null;
+  if(!await save('homework', id, {fach:d.fach, studentIds:d.studentIds, text:d.text.trim(), due:d.due||addDays(today(),7), files:(d.files||[]).map(f=>({...f, name:String(f.name||'').trim()||'Datei'})), entryId:d.entryId||null, createdAt:d.createdAt||Date.now()})) return;
+  await syncNames(Object.fromEntries((d.files||[]).map(f=>[f.path, String(f.name||'').trim()||'Datei'])));
+  await notifyMany(d.studentIds.filter(x=>!(prev?.studentIds||[]).includes(x)), 'Neue Hausaufgabe bis '+fmt(d.due), 'aufgaben', 'hw');
+  closeM(); toast('Hausaufgabe gespeichert'); };
+A.delHw = () => { const d = S.m.d; ask('Hausaufgabe löschen?', 'Die Hausaufgabe und alle Häkchen dazu werden gelöscht.', async()=>{ if(await del('homework', d.id)){ for(const sid of d.studentIds) await del('hwstatus', d.id+'__'+sid); const e = data('entries').find(x=>hwIdsOf(x).includes(d.id)); if(e){ const c = strip(e); delete c.hwId; c.hwIds = hwIdsOf(e).filter(x=>x!==d.id); await save('entries', e.id, c); } toast('Gelöscht'); } }); };
+A.toggleHw = async el => { const hid = el.dataset.id, sid = S.session.id; const st = stOf(hid,sid)||{}; const done = !st.done;
+  if(await save('hwstatus', hid+'__'+sid, {...strip(st), hwId:hid, studentId:sid, done, at:Date.now()}) && done){ toast('Erledigt – super!'); notify('teacher', me().name+' hat eine Hausaufgabe erledigt', 'aufgaben', 'hw'); } };
+A.hwNote = el => { const st = stOf(el.dataset.id, S.session.id)||{}; openM('hwNote', {hid:el.dataset.id, note:st.note||''}); };
+A.saveNote = async () => { const d = S.m.d, sid = S.session.id; const st = stOf(d.hid,sid)||{};
+  if(await save('hwstatus', d.hid+'__'+sid, {...strip(st), hwId:d.hid, studentId:sid, done:!!st.done, at:st.at||Date.now(), note:d.note.trim()})){ if(d.note.trim()) notify('teacher', me().name+' fragt zur Hausaufgabe: „'+short(d.note,80)+'“', 'aufgaben', 'msg', {from:sid}); closeM(); toast('Frage gesendet'); } };
+A.hwStudent = el => { const st = stOf(el.dataset.h, el.dataset.s)||{}; openM('hwStudent', {h:el.dataset.h, s:el.dataset.s, feedback:st.feedback||''}); };
+A.teacherToggle = async () => { const d = S.m.d; const st = stOf(d.h,d.s)||{}; if(await save('hwstatus', d.h+'__'+d.s, {...strip(st), hwId:d.h, studentId:d.s, done:!st.done, at:Date.now()})) rerenderM(); };
+A.saveFeedback = async () => { const d = S.m.d; const st = stOf(d.h,d.s)||{};
+  if(await save('hwstatus', d.h+'__'+d.s, {...strip(st), hwId:d.h, studentId:d.s, done:!!st.done, at:st.at||Date.now(), feedback:d.feedback.trim(), fbAt:Date.now()})){ if(d.feedback.trim()) notify(d.s, 'Rückmeldung zu deiner Hausaufgabe: „'+short(d.feedback,80)+'“', 'aufgaben', 'msg'); closeM(); toast('Rückmeldung gesendet'); } };
+
+/* Nachrichten */
+A.newMsg = () => { S.ui.chat = isTeacher() ? null : 's:'+S.session.id; location.hash = 'nachrichten'; render(); };
+A.newMsgTo = el => { closeM(); S.ui.chat = 's:'+el.dataset.id; if(S.route==='nachrichten') render(); else location.hash = 'nachrichten'; };
+A.openChat = el => { S.ui.chat = el.dataset.id; S.chat.stick = true; S.chat.last = null; render(); };
+A.closeChat = () => { S.ui.chat = null; render(); };
+A.notifsSeen = async () => { try{ const cur = byId('notifread', myKey())||{}; await S.db.collection('notifread').doc(myKey()).set({...strip(cur), at:Date.now()}); }catch(e){} };
+A.rmPend = el => { (S.chat.pend[S.ui.chat]||[]).splice(Number(el.dataset.i),1); render(); };
+A.chatSend = async () => { const id = S.ui.chat; if(!id || S.chat.sending) return;
+  const text = String(S.chat.draft[id]||'').trim(); const files = S.chat.pend[id]||[];
+  if(!text && !files.length) return;
+  S.chat.sending = true; render();
+  const ok = await save('msgs', uid(), {chat:id, from:myId(), text, files, at:Date.now()});
+  S.chat.sending = false;
+  if(ok){ S.chat.draft[id] = ''; S.chat.pend[id] = []; S.chat.stick = true; S.chat.focus = true; }
+  render(); };
+A.delMsg = el => { const m = byId('msgs', el.dataset.id); if(!m) return; ask('Nachricht löschen?', 'Die Nachricht wird für alle gelöscht.', async()=>{ if(await del('msgs', m.id)) toast('Gelöscht'); }, 'Löschen'); };
+async function chatUpload(files){
+  const id = S.ui.chat; if(!id || !files?.length) return; S.chat.sending = true; render();
+  for(const f of files){ if(f.size > 20*1024*1024){ toast(f.name+' ist größer als 20 MB.'); continue; } try{ (S.chat.pend[id] ||= []).push(await KD.uploadFile(f)); }catch(e){ toast('Upload fehlgeschlagen: '+f.name); } }
+  S.chat.sending = false; render();
+}
+
+/* Schüler & Gruppen */
+A.newStud = el => openM('stud', {name:'', klasse:'5', schule:'', groupId:el?.dataset?.g || '', faecher:['Mathe','Deutsch'], username:'', pw:genPw(), color:COLORS[students().length % COLORS.length]});
+A.editStud = el => { const s = byId('students', el.dataset.id); openM('stud', {id:s.id, name:s.name, klasse:s.klasse, schule:s.schule||'', groupId:s.groupId||'', faecher:[...(s.faecher||[])], username:s.username||'', pw:'', color:s.color, createdAt:s.createdAt}); };
+A.genPw = () => { S.m.d.pw = genPw(); rerenderM(); };
+A.saveStud = async () => { const d = S.m.d;
+  const name = d.name.trim(); if(!name) return toast('Bitte einen Namen eingeben.');
+  const u = normUser(d.username || name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ß/g,'ss'));
+  if(!/^[a-z0-9._-]{3,40}$/.test(u)) return toast('Benutzername: mind. 3 Zeichen, nur a–z, Zahlen, Punkt, Strich.');
+  if(u===set().teacherUser || students().some(s=>s.id!==d.id && s.username===u)) return toast('Dieser Benutzername ist schon vergeben.');
+  const old = d.id ? byId('students', d.id) : null;
+  if((!d.id || d.pw) && String(d.pw||'').length<6) return toast('Das Passwort braucht mindestens 6 Zeichen.');
+  let id = d.id;
+  if(!id){ const r = await KD.manageUser({action:'create', username:u, password:d.pw}); if(r.error) return toast(r.error); id = r.uid; }
+  else if(d.pw || old?.username!==u){ const r = await KD.manageUser({action:'update', uid:id, username: old?.username!==u ? u : '', password:d.pw||''}); if(r.error) return toast(r.error); }
+  if(!await save('students', id, {name, username:u, klasse:d.klasse, schule:d.schule.trim(), groupId:d.groupId||'', faecher:d.faecher, color:d.color, createdAt:d.createdAt||Date.now()})) return;
+  await syncGroups();
+  if(d.pw) openM('creds', {name, username:u, pw:d.pw}); else { closeM(); toast('Gespeichert'); } };
+A.copyCreds = async () => { const d = S.m.d; try{ await navigator.clipboard.writeText('Klecks – Zugang für '+d.name+'\nAdresse: '+location.href.split('#')[0]+'\nBenutzername: '+d.username+'\nPasswort: '+d.pw); toast('Kopiert'); }catch(e){ toast('Kopieren nicht möglich – bitte abschreiben.'); } };
+A.delStud = () => { const d = S.m.d; ask(d.name+' löschen?', 'Profil, Zugang, Lernfortschritt und Klausuren werden gelöscht. Einträge in der Kursmappe bleiben.', async()=>{ const r = await KD.manageUser({action:'delete', uid:d.id}); if(r.error) return toast(r.error); await del('students', d.id); await del('progress', d.id); for(const e of examsFor(d.id)) await del('exams', e.id); toast('Gelöscht'); }); };
+A.studDetail = el => { S.ui.q=''; openM('studDetail', {id:el.dataset.id}); };
+A.newGroup = () => openM('group', {name:'', note:'', color:COLORS[groups().length % COLORS.length], members:[]});
+A.editGroup = el => { const g = byId('groups', el.dataset.id); openM('group', {id:g.id, name:g.name, note:g.note||'', color:g.color, members:students().filter(s=>s.groupId===g.id).map(s=>s.id), createdAt:g.createdAt}); };
+A.saveGroup = async () => { const d = S.m.d; if(!d.name.trim()) return toast('Bitte einen Namen eingeben.'); const id = d.id || uid();
+  if(!await save('groups', id, {name:d.name.trim(), note:(d.note||'').trim(), color:d.color, memberIds:d.members, createdAt:d.createdAt||Date.now()})) return;
+  for(const s of students()){ const inG = d.members.includes(s.id); if(inG && s.groupId!==id) await save('students', s.id, {...strip(s), groupId:id}); if(!inG && s.groupId===id) await save('students', s.id, {...strip(s), groupId:''}); }
+  closeM(); toast(d.id?'Gespeichert':'Gruppe angelegt'); };
+A.delGroup = () => { const d = S.m.d; ask('Gruppe „'+d.name+'“ löschen?', 'Die Schüler bleiben erhalten.', async()=>{ if(await del('groups', d.id)){ for(const s of students().filter(x=>x.groupId===d.id)) await save('students', s.id, {...strip(s), groupId:''}); toast('Gelöscht'); } }); };
+
+/* Klausuren */
+A.newExam = el => { const sid = el?.dataset?.sid || (isTeacher() ? (students()[0]?.id||'') : S.session.id); openM('exam', {studentId:sid, date:addDays(today(),14), fach:(byId('students',sid)?.faecher||[])[0]||'Mathe', themen:''}); };
+A.examOpen = el => { const e = byId('exams', el.dataset.id); if(e) openM('exam', {...e}); };
+A.saveExam = async () => { const d = S.m.d; if(!d.studentId) return toast('Bitte einen Schüler auswählen.'); if(!d.date) return toast('Bitte ein Datum wählen.');
+  const id = d.id || uid(); const isNew = !d.id; const prevNote = byId('exams',id)?.note;
+  const body = {studentId:d.studentId, date:d.date, fach:d.fach, themen:(d.themen||'').trim(), note:d.note||'', kommentar:(d.kommentar||'').trim(), createdBy:d.createdBy||(isTeacher()?'teacher':'student'), createdAt:d.createdAt||Date.now()};
+  if(!await save('exams', id, body)) return; const s = byId('students', d.studentId);
+  if(isTeacher()){ if(isNew) await notify(d.studentId, d.fach+'-Klausur am '+fmt(d.date)+' eingetragen', 'klausuren', 'exam'); }
+  else if(isNew) await notify('teacher', s.name+' hat eine '+d.fach+'-Klausur am '+fmt(d.date)+' eingetragen'+(body.themen?' – '+short(body.themen,60):''), 'klausuren', 'exam');
+  else if(body.note && body.note!==prevNote) await notify('teacher', s.name+' hat die Note '+body.note+' eingetragen', 'klausuren', 'exam');
+  closeM(); toast(isNew?'Klausur eingetragen – viel Erfolg beim Üben!':'Gespeichert'); };
+A.delExam = () => { const d = S.m.d; ask('Klausur löschen?', 'Die Klausur am '+fmt(d.date)+' wird gelöscht.', async()=>{ if(await del('exams', d.id)) toast('Gelöscht'); }); };
+
+/* Termine */
+A.newTermin = el => openM('termin', {date:addDays(today(),1), time:'16:00', studentIds:preIds(el), fach:'Alle', note:'', weekly:false});
+A.editTermin = el => { const x = byId('termine', el.dataset.id); openM('termin', {...x, studentIds:[...(x.studentIds||[])]}); };
+A.saveTermin = async () => { const d = S.m.d; if(!d.studentIds.length) return toast('Bitte mindestens einen Schüler auswählen.');
+  const isNew = !d.id; const n = isNew && d.weekly ? 4 : 1;
+  for(let i=0;i<n;i++){ const id = i===0 && d.id ? d.id : uid(); if(!await save('termine', id, {date:addDays(d.date,i*7), time:d.time||'', studentIds:d.studentIds, fach:d.fach||'Alle', note:(d.note||'').trim(), createdAt:d.createdAt||Date.now()})) return; }
+  if(isNew) await notifyMany(d.studentIds, 'Nachhilfe am '+fmt(d.date)+(d.time?' um '+d.time+' Uhr':'')+(n>1?' (wöchentlich)':''), 'kalender', 'termin');
+  closeM(); toast(n>1?'4 Termine eingetragen':'Termin gespeichert'); };
+A.delTermin = () => { const d = S.m.d; ask('Termin löschen?', 'Der Termin am '+fmt(d.date)+' wird gelöscht.', async()=>{ if(await del('termine', d.id)) toast('Gelöscht'); }); };
+
+/* Kalender */
+A.calNav = el => { const b = S.ui.calMonth ? parse(S.ui.calMonth) : new Date(new Date().getFullYear(), new Date().getMonth(), 1); b.setMonth(b.getMonth()+Number(el.dataset.n)); S.ui.calMonth = ymd(b); render(); };
+A.calDay = el => { S.ui.calDay = el.dataset.d; render(); };
+A.calEv = el => { const k = el.dataset.k, l = el.dataset.l; if(k==='exam') return A.examOpen(el); if(k==='termin' && isTeacher()) return A.editTermin(el); if(l && l!=='termin' && l!=='exam') location.hash = l; };
+
+/* Kurse */
+A.openCourse = el => { closeM(); S.ui.q = ''; if(S.route!=='kurse'){ S.pendingCourse = el.dataset.id; location.hash = 'kurse'; } else { S.ui.course = el.dataset.id; render(); window.scrollTo(0,0); } };
+A.closeCourse = () => { S.ui.course = null; render(); };
+A.locked = () => toast('Schaffe zuerst das Blatt davor (mindestens 1 Stern).');
+A.play = el => startLesson(S.ui.course, Number(el.dataset.i));
+A.pStart = () => { S.p.phase = 'q'; renderP(); };
+A.pSel = el => { if(S.p.phase!=='q') return; S.p.ans.sel = Number(el.dataset.i); renderP(); };
+A.pTf = el => { if(S.p.phase!=='q') return; (S.p.ans.tf ||= {})[el.dataset.i] = el.dataset.v==='1'; renderP(); };
+A.pSort = el => { if(S.p.phase!=='q') return; (S.p.ans.so ||= {})[el.dataset.i] = Number(el.dataset.v); renderP(); };
+A.pOrd = el => { if(S.p.phase!=='q') return; const o = (S.p.ans.ord ||= []); const i = Number(el.dataset.i); const pos = o.indexOf(i); if(pos>=0) o.splice(pos,1); else o.push(i); renderP(); };
+A.pOrdReset = () => { S.p.ans.ord = []; renderP(); };
+A.pCheck = () => { if(canCheck()) checkAnswer(); };
+A.pCont = () => pCont();
+A.pRetry = () => startLesson(S.p.c.id, S.p.li);
+A.pNext = () => startLesson(S.p.c.id, S.p.li+1);
+A.pClose = () => { S.p = null; renderP(); render(); };
+A.courseProgress = el => openM('courseProgress', {id:el.dataset.id});
+const blankQ = () => ({type:'mc', q:'', options:['','','',''], answer:0, hint:''});
+A.newCourse = () => openM('course', {title:'', desc:'', fach:'Mathe', klasse:'5', studentIds:[], lessons:[], draft:false, edit:null});
+A.editCourse = el => { const c = byId('courses', el.dataset.id); openM('course', {...JSON.parse(JSON.stringify(c)), studentIds:[...(c.studentIds||[])], edit:null}); };
+A.addL = () => { S.m.d.lessons.push({id:uid(), title:'', intro:'', questions:[blankQ()]}); S.m.d.edit = S.m.d.lessons.length-1; renderM(); };
+A.editL = el => { S.m.d.edit = Number(el.dataset.i); renderM(); };
+A.rmL = el => { S.m.d.lessons.splice(Number(el.dataset.i),1); rerenderM(); };
+A.mvL = el => { const i = Number(el.dataset.i), j = i+Number(el.dataset.n); const L = S.m.d.lessons; if(j<0||j>=L.length) return; [L[i],L[j]] = [L[j],L[i]]; rerenderM(); };
+A.addQ = () => { S.m.d.lessons[S.m.d.edit].questions.push(blankQ()); rerenderM(); const qs = document.querySelectorAll('.qed'); qs[qs.length-1]?.scrollIntoView({behavior:'smooth'}); };
+A.rmQ = el => { S.m.d.lessons[S.m.d.edit].questions.splice(Number(el.dataset.i),1); rerenderM(); };
+A.lessonDone = () => { S.m.d.edit = null; renderM(); };
+A.saveCourse = async () => { const d = S.m.d; if(!d.title.trim()) return toast('Bitte einen Titel eingeben.');
+  const lessons = d.lessons.map(l=>({...l, title:(l.title||'').trim()||'Arbeitsblatt', intro:(l.intro||'').trim(), test:!!l.test, questions:l.questions.map(q=>{
+    const t = q.type||'mc';
+    if(t==='mc') return {type:'mc', q:String(q.q||'').trim(), options:(q.options||[]).map(o=>String(o||'').trim()), answer:Number(q.answer||0), hint:(q.hint||'').trim()};
+    if(t==='input') return {type:'input', q:String(q.q||'').trim(), answer:String(q.answer||'').trim(), hint:(q.hint||'').trim(), ...(q.cs?{cs:true}:{})};
+    if(t==='gap') return {type:'gap', q:String(q.q||'').trim(), text:String(q.text||''), hint:(q.hint||'').trim(), ...(q.cs===false?{cs:false}:{})};
+    if(t==='tf') return {type:'tf', q:String(q.q||'').trim(), items:q.tfText!=null?parseTf(q.tfText):(q.items||[]), hint:(q.hint||'').trim()};
+    return q; }).filter(q=>q.q||q.text||q.items)}));
+  const bad = lessons.flatMap(l=>l.questions).find(q=>q.type==='mc' ? !(q.options[q.answer]||'').trim() : q.type==='input' ? !q.answer : q.type==='gap' ? !gapParts(q.text).some(x=>x.ans) : q.type==='tf' ? !(q.items||[]).length : false);
+  if(bad) return toast('Bei „'+short(bad.q||bad.text,30)+'“ fehlt die Lösung.');
+  const id = d.id || uid(); const isNew = !d.id;
+  if(!await save('courses', id, {title:d.title.trim(), desc:(d.desc||'').trim(), fach:d.fach, klasse:d.klasse, studentIds:d.studentIds||[], lessons, draft:!!d.draft, order:d.order||null, ver:d.ver||null, builtin:!!d.builtin, edited:!!d.builtin, createdAt:d.createdAt||Date.now()})) return;
+  if(isNew && !d.draft){ const targets = students().filter(s=>d.studentIds?.length ? d.studentIds.includes(s.id) : (d.klasse==='alle'||d.klasse===s.klasse)).map(s=>s.id); await notifyMany(targets, 'Neuer Kurs: '+d.title.trim(), 'kurse', 'course'); }
+  closeM(); toast('Kurs gespeichert'); };
+A.delCourse = () => { const d = S.m.d; ask('Kurs löschen?', '„'+d.title+'“ wird mit allen Arbeitsblättern gelöscht.', async()=>{ if(await del('courses', d.id)){ if(BUILTIN.some(b=>b.id===d.id)) await save('settings','main',{...strip(set()), removedKurse:[...new Set([...(set().removedKurse||[]), d.id])]}); S.ui.course = null; render(); toast('Gelöscht'); } }); };
+
+document.addEventListener('click', ev => {
+  const same = ev.target.closest('a[href^="#"]');
+  if(same && same.getAttribute('href')===location.hash && !same.dataset.a){ S.ui.course = null; S.ui.q=''; render(); window.scrollTo(0,0); return; }
+  if(S.ui.q && !ev.target.closest('.search')){ S.ui.q = ''; if(!ev.target.closest('[data-a]')) { render(); return; } }
+  const el = ev.target.closest('[data-a]'); if(!el) return;
+  const a = el.dataset.a; if(a==='upload' || a==='studFilter' || a==='chatUpload') return;
+  if(!A[a]) return;
+  if(el.tagName==='BUTTON' || (el.tagName==='A' && el.getAttribute('href')==='#')) ev.preventDefault();
+  if(a==='closeM' && el.tagName==='A'){ closeM(); return; }
+  if(a==='clearQ'){ S.ui.q=''; return; }
+  A[a](el, ev);
+});
+
+boot();
+}
