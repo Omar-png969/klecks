@@ -16,6 +16,8 @@
       case 'notifread': return { readers: id === 'teacher' ? [] : arr([id]), public_read: false };
       case 'courses': return (d.studentIds && d.studentIds.length) ? { readers: arr(d.studentIds), public_read: false } : { readers: [], public_read: true };
       case 'settings': return { readers: [], public_read: true };
+      case 'groups': return { readers: arr(d.memberIds), public_read: false };
+      case 'msgs': return { readers: [], public_read: false }; // Server setzt die Leser
       default: return { readers: [], public_read: false }; // groups u. a.: nur Lehrkraft
     }
   }
@@ -90,7 +92,10 @@
   }
   async function uploadFile(file){
     const safe = file.name.replace(/[^\w.\-]+/g,'_').slice(-80);
-    const path = Date.now().toString(36)+Math.random().toString(36).slice(2,6)+'/'+safe;
+    const { data: ses } = await sb.auth.getSession(); const me = ses?.session?.user?.id;
+    const { data: rr } = me ? await sb.from('roles').select('role').eq('uid', me).maybeSingle() : { data:null };
+    const prefix = rr?.role === 'student' ? 'u-'+me+'/' : '';
+    const path = prefix+Date.now().toString(36)+Math.random().toString(36).slice(2,6)+'/'+safe;
     const { error } = await sb.storage.from('files').upload(path, file, { contentType: file.type || undefined });
     if(error) throw err(error);
     return { path, name:file.name, type:file.type };

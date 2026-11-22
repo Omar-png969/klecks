@@ -5,7 +5,7 @@
    Daten: Supabase über data.js (collection/doc), Rechte serverseitig (RLS)
    ===================================================================== */
 const KD = window.KlecksData;
-const COLS = ['settings','groups','students','entries','homework','hwstatus','courses','progress','exams','termine','notifs','notifread'];
+const COLS = ['msgs','settings','groups','students','entries','homework','hwstatus','courses','progress','exams','termine','notifs','notifread'];
 const FACH = {
   Mathe:{c:'#2f6fed',cov:'#0d5468',g:'÷'},
   Deutsch:{c:'#e8553e',cov:'#8f3424',g:'Aa'},
@@ -13,7 +13,8 @@ const FACH = {
   Biologie:{c:'#16a36a',cov:'#1f5a3a',g:'Bio'},
   Sonstiges:{c:'#6b7280',cov:'#374151',g:'+'}
 };
-const FAECHER = Object.keys(FACH);
+const FAECHER = ['Mathe','Deutsch','Englisch','Biologie'];
+const realF = f => FAECHER.includes(f);
 const COLORS = ['#2f6fed','#e8553e','#8b5cf6','#16a36a','#e84a8a','#f29e1f','#0ea5b7','#6b7280'];
 const WD = ['So','Mo','Di','Mi','Do','Fr','Sa'];
 const WDL = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
@@ -76,8 +77,9 @@ const ic = (n,cls='i') => '<svg class="'+cls+'" viewBox="0 0 24 24" aria-hidden=
 const star = on => '<svg viewBox="0 0 24 24" class="'+(on?'st-on':'st-off')+'" aria-hidden="true"><path stroke-width="1.4" stroke-linejoin="round" d="M12 2.8l2.8 5.8 6.3.9-4.6 4.4 1.1 6.3L12 17.2 6.4 20.2l1.1-6.3L2.9 9.5l6.3-.9z"/></svg>';
 const stars = (n,max=3) => '<span class="stars" aria-label="'+n+' von '+max+' Sternen">'+Array.from({length:max},(_,i)=>star(i<n)).join('')+'</span>';
 const kl = k => (!k||k==='alle') ? 'alle Klassen' : 'Klasse '+esc(k);
-const examName = e => e.fach==='Sonstiges' ? short(String(e.themen||'Klausur').split('\n')[0],34) : e.fach+'-Klausur';
-const fchip = f => '<span class="chip f" style="background:'+fc(f)+'">'+esc(f)+'</span>';
+const examName = e => !realF(e.fach) ? short(String(e.themen||'Klausur').split('\n')[0],34) : e.fach+'-Klausur';
+const fchip = f => !realF(f) ? '' : fchip0(f);
+const fchip0 = f => '<span class="chip f" style="background:'+fc(f)+'">'+esc(f)+'</span>';
 const ava = (s,cls='') => '<span class="ava '+cls+'" style="background:'+esc(s?.color||'#6b7280')+'">'+esc(initials(s?.name))+'</span>';
 
 /* ---------- 3D-App-Symbole ---------- */
@@ -158,7 +160,7 @@ function hwStats(sid){ const hw = hwFor(sid); const done = hw.filter(h=>isDone(h
 function lastActive(sid){ const p = prog(sid); let t = p.lastActive || 0; data('hwstatus').forEach(x=>{ if(x.studentId===sid && x.at>t) t = x.at; }); return t; }
 const names = ids => (ids||[]).map(id=>byId('students',id)?.name).filter(Boolean).join(', ') || '–';
 const set = () => byId('settings','main') || {};
-const entryFaecher = e => (e.faecher && e.faecher.length) ? e.faecher : [e.fach||'Sonstiges'];
+const entryFaecher = e => ((e.faecher && e.faecher.length) ? e.faecher : [e.fach]).filter(realF);
 const hwIdsOf = e => e.hwIds || (e.hwId ? [e.hwId] : []);
 function matchF(ids){ const f = S.ui.stud; if(f==='alle') return true; if(f.startsWith('g:')){ const g = f.slice(2); return (ids||[]).some(id=>byId('students',id)?.groupId===g); } return (ids||[]).includes(f); }
 const myCourses = () => isTeacher() ? data('courses').slice() : coursesFor(me());
@@ -186,6 +188,10 @@ function mergeBuiltin(){
   const have = new Set(S.d.courses.map(c=>c.id)); const gone = new Set(set().removedKurse||[]);
   BUILTIN.forEach(b=>{ if(!have.has(b.id) && !gone.has(b.id)) S.d.courses.push({...b, local:true}); });
 }
+async function syncGroups(){
+  for(const g of groups()){ const ids = students().filter(s=>s.groupId===g.id).map(s=>s.id).sort();
+    if(JSON.stringify((g.memberIds||[]).slice().sort())!==JSON.stringify(ids)){ try{ await S.db.collection('groups').doc(g.id).set({...strip(g), memberIds:ids}); }catch(e){} } }
+}
 async function seedCourses(){
   if(!isTeacher() || seedCourses.done) return; seedCourses.done = true;
   const gone = new Set(set().removedKurse||[]);
@@ -211,7 +217,7 @@ function startData(who){
     S.isEditor = who.role==='teacher';
     S.ready = false; S.d = Object.fromEntries(COLS.map(c=>[c,[]]));
     const pending = new Set(COLS);
-    const done = () => { if(S.ready) return; S.ready = true; clearTimeout(timer); S.session = who.role==='teacher' ? {role:'teacher'} : {role:'student', id:who.uid}; if(who.role==='teacher'){ prune(); setTimeout(seedCourses, 1500); } render(); resolve(); };
+    const done = () => { if(S.ready) return; S.ready = true; clearTimeout(timer); S.session = who.role==='teacher' ? {role:'teacher'} : {role:'student', id:who.uid}; if(who.role==='teacher'){ prune(); setTimeout(seedCourses, 1500); setTimeout(syncGroups, 2500); } render(); resolve(); };
     const timer = setTimeout(()=>{ S.slow = true; done(); }, 10000);
     $('#app').innerHTML = '<div class="boot">'+logo(64)+'<p>Klecks wird geladen …</p></div>';
     COLS.forEach(c => {
@@ -220,7 +226,7 @@ function startData(who){
     });
   });
 }
-async function logout(){ S.session = null; S.ready = true; S.lastLogin = null; closeM(); S.p = null; renderP(); await KD.signOut(); S.d = Object.fromEntries(COLS.map(c=>[c,[]])); render(); }
+async function logout(){ S.ui.chat = null; S.chat.draft = {}; S.chat.pend = {}; S.session = null; S.ready = true; S.lastLogin = null; closeM(); S.p = null; renderP(); await KD.signOut(); S.d = Object.fromEntries(COLS.map(c=>[c,[]])); render(); }
 async function prune(){ const old = data('notifs').filter(n=>n.at < Date.now()-60*864e5).slice(0,30); for(const n of old){ try{ await S.db.collection('notifs').doc(n.id).delete(); }catch(e){ break; } } }
 let rq = 0;
 function schedule(){ if(rq) return; rq = requestAnimationFrame(()=>{ rq = 0; if(S.ready) render(); }); }
@@ -265,7 +271,7 @@ function badges(){
     b.aufgaben = hwFor(sid).filter(h=>!isDone(h.id,sid)).length;
     b.klausuren = examsFor(sid).filter(e=>diffDays(e.date)>=0 && diffDays(e.date)<=7).length;
   }
-  b.nachrichten = unreadMsgs();
+  b.nachrichten = unreadChats();
   return b;
 }
 function render(){
@@ -280,6 +286,7 @@ function render(){
   const rail = '<a href="#start" class="'+(S.route==='start'?'on':'')+'">'+appIcon('start')+'Start</a>'+appsFor().map(a=>'<a href="#'+a.id+'" class="'+(S.route===a.id?'on':'')+'">'+appIcon(a.id)+esc(a.name)+(b[a.id]?'<span class="rb">'+b[a.id]+'</span>':'')+'</a>').join('');
   const mnav = '<a href="#start" class="'+(S.route==='start'?'on':'')+'">'+appIcon('start')+'Start</a>'+appsFor().map(a=>'<a href="#'+a.id+'" class="'+(S.route===a.id?'on':'')+'">'+appIcon(a.id)+esc(a.name)+(b[a.id]?' <span class="chip bad" style="padding:0 6px">'+b[a.id]+'</span>':'')+'</a>').join('');
   const activeSearch = document.activeElement?.id==='q';
+  S.chat.focus = document.activeElement?.id==='chat-in';
   app.innerHTML =
     '<div class="shell"><nav class="rail" aria-label="Apps"><a class="rail-logo" href="#start" aria-label="Start" style="padding:0;width:auto">'+logo(36)+'</a>'+rail+
       '<div class="rail-foot"><button class="btn flat icon" data-a="settings" aria-label="Einstellungen">'+ic('gear')+'</button><button class="btn flat icon" data-a="logout" aria-label="Abmelden">'+ic('out')+'</button></div></nav>'+
@@ -287,10 +294,10 @@ function render(){
       '<div class="search">'+ic('search')+'<input id="q" placeholder="In Klecks suchen" value="'+esc(S.ui.q)+'" autocomplete="off" aria-label="Suchen">'+searchResults()+'</div>'+
       '<div class="tb-right"><button class="btn flat icon" data-a="theme" aria-label="'+(isDark()?'Heller Modus':'Dunkler Modus')+'">'+ic(isDark()?'sun':'moon')+'</button>'+
       '<button class="btn flat icon ib" data-a="notifs" aria-label="Benachrichtigungen">'+ic('bell')+(nb?'<span class="dotn">'+nb+'</span>':(rem?'<span class="dotw"></span>':''))+'</button>'+
-      '<button class="btn flat icon" data-a="menu" aria-label="Konto" style="padding:0">'+ava(who,'sm')+'</button></div></header>'+
-      '<nav class="mobile-nav" aria-label="Apps">'+mnav+'</nav>'+
+      '<button class="btn flat icon" data-a="menu" aria-label="Konto" style="padding:0">'+ava(who,'sm')+'</button></div><nav class="mobile-nav" aria-label="Apps">'+mnav+'</nav></header>'+
       '<main class="main">'+(S.slow?'<div class="chip warn" style="margin-bottom:12px">Verbindung langsam – Daten evtl. nicht aktuell</div>':'')+view()+'</main></div></div>';
   if(activeSearch){ const q = $('#q'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  afterChatRender();
 }
 function view(){
   switch(S.route){
@@ -407,9 +414,9 @@ function entryCard(e){
   const hws = hwIdsOf(e).map(id=>byId('homework',id)).filter(h=>h && (t || h.studentIds.includes(sid)));
   const lines = String(e.inhalt||'').split(/\n+/).map(l=>l.replace(/^[-•*]\s*/,'').trim()).filter(Boolean);
   const hwBox = hws.map(hw=>{ const ids = hw.studentIds.filter(id=>byId('students',id)); const dn = ids.filter(id=>isDone(hw.id,id)).length;
-    return '<div class="e-sec hw"><b>'+ic('task')+(t?(hws.length>1?esc(names(ids))+' · ':'')+'Hausaufgabe bis '+fmt(hw.due)+' · '+dn+'/'+ids.length+' erledigt':'Hausaufgabe bis '+fmt(hw.due)+(isDone(hw.id,sid)?' · erledigt':''))+'</b><span style="white-space:pre-wrap">'+esc(hw.text)+'</span></div>'; }).join('');
+    return '<div class="e-sec ehw"><b>'+ic('task')+(t?(hws.length>1?esc(names(ids))+' · ':'')+'Hausaufgabe bis '+fmt(hw.due)+' · '+dn+'/'+ids.length+' erledigt':'Hausaufgabe bis '+fmt(hw.due)+(isDone(hw.id,sid)?' · erledigt':''))+'</b><span style="white-space:pre-wrap">'+esc(hw.text)+'</span></div>'; }).join('');
   const att = e.attendance || {};
-  const attBox = t && Object.keys(att).length ? '<div class="e-sec att"><b class="tiny muted">Anwesenheit</b><div class="att-row">'+(e.studentIds||[]).map(id=>{ const s = byId('students',id); if(!s) return ''; const v = att[id]||'da'; const col = v==='da'?'var(--ok)':v==='entschuldigt'?'var(--warn)':'var(--bad)'; return '<span class="att">'+ava(s,'xs')+esc(s.name)+' <i style="background:'+col+'"></i>'+(v==='da'?'anwesend':v)+'</span>'; }).join('')+'</div></div>' : '';
+  const attBox = t && Object.keys(att).length ? '<div class="e-sec eatt"><b class="tiny muted">Anwesenheit</b><div class="att-row">'+(e.studentIds||[]).map(id=>{ const s = byId('students',id); if(!s) return ''; const v = att[id]||'da'; const col = v==='da'?'var(--ok)':v==='entschuldigt'?'var(--warn)':'var(--bad)'; return '<span class="att">'+ava(s,'xs')+esc(s.name)+' <i style="background:'+col+'"></i>'+(v==='da'?'anwesend':v)+'</span>'; }).join('')+'</div></div>' : '';
   return '<article class="entry"><div class="e-date"><b>'+d.getDate()+'</b><span>'+WD[d.getDay()]+', '+MON[d.getMonth()].slice(0,3)+'</span></div><div class="e-body">'+
     '<div class="e-top">'+entryFaecher(e).map(fchip).join('')+(t?'<span class="tiny muted">'+esc(names(e.studentIds))+'</span><span class="sp"></span><button class="btn flat sm icon" data-a="editEntry" data-id="'+esc(e.id)+'" aria-label="Bearbeiten">'+ic('edit')+'</button>':'')+'</div>'+
     '<h3>'+esc(e.thema)+'</h3>'+(lines.length?'<div class="e-inhalt">'+lines.map(l=>'<div>'+esc(l)+'</div>').join('')+'</div>':'')+
@@ -478,7 +485,7 @@ function vKurse(){
   const fs = ['Alle', ...FAECHER.filter(f=>myCourses().some(c=>c.fach===f))];
   const ks = ['alle','5','6'];
   return pageHead('kurse','Kurse', t?'Jeder Kurs ist ein Heft aus Arbeitsblättern: Merkkasten, Übungen vom Leichten zum Schweren und ein Test zum Schluss.':'Wähle einen Kurs und arbeite die Blätter der Reihe nach durch. Für jedes Blatt gibt es bis zu 3 Sterne.', t?'<button class="btn primary" data-a="newCourse">'+ic('plus')+'Kurs erstellen</button>':'<span class="chip acc">'+ic('bolt')+(p.xp||0)+' Punkte · Level '+level(p.xp).lv+'</span>')+
-    (prep?'<div class="card" style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+appIcon('klausuren')+'<div class="grow" style="flex:1"><b>'+esc(examName(prep))+' '+rel(prep.date)+'</b><div class="tiny muted">Übe jetzt mit den passenden Kursen.</div></div>'+(prep.fach!=='Sonstiges'?'<button class="btn ghost sm" data-a="fach" data-f="'+esc(prep.fach)+'">Kurse zeigen</button>':'')+'</div>':'')+
+    (prep?'<div class="card" style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'+appIcon('klausuren')+'<div class="grow" style="flex:1"><b>'+esc(examName(prep))+' '+rel(prep.date)+'</b><div class="tiny muted">Übe jetzt mit den passenden Kursen.</div></div>'+(realF(prep.fach)?'<button class="btn ghost sm" data-a="fach" data-f="'+esc(prep.fach)+'">Kurse zeigen</button>':'')+'</div>':'')+
     '<div class="filters"><div class="seg2">'+fs.map(f=>'<button class="'+(S.ui.fach===f?'on':'')+'" data-a="fach" data-f="'+f+'">'+f+'</button>').join('')+'</div><div class="seg2">'+ks.map(k=>'<button class="'+(S.ui.klasse===k?'on':'')+'" data-a="klasse" data-k="'+k+'">'+(k==='alle'?'Alle Klassen':'Klasse '+k)+'</button>').join('')+'</div></div>'+
     (cs.length?'<div class="covers">'+cs.map(c=>{ const max = (c.lessons||[]).length*3, got = p?courseStars(c,p):0;
       return '<button class="cov" data-a="openCourse" data-id="'+esc(c.id)+'">'+cover(c)+'<div class="cov-meta"><b>'+esc(c.title)+'</b><span class="tiny muted">'+esc(short(c.desc||'',70))+'</span>'+(p?'<div class="bar sun"><i style="width:'+(max?got/max*100:0)+'%"></i></div>':'')+'</div></button>'; }).join('')+'</div>'
@@ -502,7 +509,7 @@ function vCourse(){
 function events(){
   const t = isTeacher(); const sid = t ? null : S.session.id; const ev = [];
   (t?data('homework'):hwFor(sid)).forEach(h=>ev.push({date:h.due, kind:'hw', color:'var(--ok)', title:'Abgabe: '+short(h.text,40), sub:t?names(h.studentIds):h.fach, done:!t && isDone(h.id,sid), link:'aufgaben'}));
-  (t?data('exams').filter(e=>byId('students',e.studentId)):examsFor(sid)).forEach(e=>ev.push({date:e.date, kind:'exam', color:'#7c3aed', title:(t?byId('students',e.studentId).name+': ':'')+examName(e), sub:e.fach==='Sonstiges'?String(e.themen||'').split('\n').slice(1).join(' '):(e.themen||''), id:e.id, link:'exam'}));
+  (t?data('exams').filter(e=>byId('students',e.studentId)):examsFor(sid)).forEach(e=>ev.push({date:e.date, kind:'exam', color:'#7c3aed', title:(t?byId('students',e.studentId).name+': ':'')+examName(e), sub:!realF(e.fach)?String(e.themen||'').split('\n').slice(1).join(' '):(e.themen||''), id:e.id, link:'exam'}));
   (t?data('termine'):termineFor(sid)).forEach(x=>ev.push({date:x.date, kind:'termin', color:'#e03131', title:'Nachhilfe'+(x.time?' '+x.time+' Uhr':''), sub:(t?names(x.studentIds):'')+(x.note?' · '+x.note:''), id:x.id, link:'termin'}));
   (t?data('entries'):entriesFor(sid)).forEach(e=>ev.push({date:e.date, kind:'stunde', color:'#2f6fed', title:'Stunde: '+e.thema, sub:entryFaecher(e).join(', '), link:'kursmappe'}));
   return ev;
@@ -551,14 +558,89 @@ function vKlausuren(){
 /* =====================================================================
    NACHRICHTEN
    ===================================================================== */
-function vNachrichten(){
-  const t = isTeacher(); const list = myNotifs(); const ra = readAt();
-  const msgs = list.filter(n=>n.kind==='msg'), other = list.filter(n=>n.kind!=='msg');
-  const item = n => '<div class="msg '+(n.at>ra?'new':'')+'">'+(n.kind==='msg'&&n.from&&byId('students',n.from)?ava(byId('students',n.from),'sm'):'<span class="ava sm" style="background:'+(n.kind==='msg'?'#2563eb':'#9ca3af')+'">'+ic(n.kind==='msg'?'msg':'bell')+'</span>')+'<div><b style="font-weight:'+(n.kind==='msg'?700:600)+';white-space:pre-wrap">'+esc(n.text)+'</b><div class="tiny muted">'+ago(n.at)+(n.link&&n.kind!=='msg'?' · <a href="#'+esc(n.link)+'">öffnen</a>':'')+'</div></div></div>';
-  return pageHead('nachrichten','Nachrichten', t?'Schreib deinen Schülern oder einer ganzen Gruppe. Neuigkeiten aus Klecks landen ebenfalls hier.':'Nachrichten von '+esc(set().teacherName||'deiner Lehrkraft')+' und alle Neuigkeiten.', '<button class="btn primary" data-a="newMsg">'+ic('send')+'Nachricht schreiben</button>')+
-    '<div class="grid2"><section class="card"><h2 style="margin-bottom:8px">Nachrichten</h2>'+(msgs.length?msgs.map(item).join(''):empty('Noch keine Nachrichten','Hier erscheinen Nachrichten.'))+'</section>'+
-    '<section class="card"><h2 style="margin-bottom:8px">Neuigkeiten</h2>'+(other.length?other.slice(0,30).map(item).join(''):empty('Noch ruhig hier','Klecks meldet hier neue Aufgaben, Stunden und Erinnerungen.'))+'</section></div>';
+/* =====================================================================
+   NACHRICHTEN (Chat wie WhatsApp/Teams)
+   ===================================================================== */
+S.chat = {draft:{}, pend:{}, sending:false, urls:{}, last:null, n:0};
+function chatList(){
+  const out = [];
+  if(isTeacher()){
+    groups().forEach(g=>out.push({id:'g:'+g.id, name:g.name, sub:'Gruppe · '+names(students().filter(s=>s.groupId===g.id).map(s=>s.id)), color:g.color||'#2f6fed', group:true}));
+    students().forEach(s=>out.push({id:'s:'+s.id, name:s.name, sub:'Klasse '+s.klasse, color:s.color}));
+  } else {
+    const s = me(); out.push({id:'s:'+s.id, name:set().teacherName||'Lehrkraft', sub:'Lehrkraft', color:'#2f6fed'});
+    if(s.groupId){ const g = byId('groups', s.groupId); out.push({id:'g:'+s.groupId, name:g?.name||'Meine Gruppe', sub:'Gruppe', color:g?.color||'#8b5cf6', group:true}); }
+  }
+  out.forEach(c=>{ const ms = chatMsgs(c.id); c.lastMsg = ms[ms.length-1]; c.unread = chatUnread(c.id); });
+  out.sort((a,b)=>(b.lastMsg?.at||0)-(a.lastMsg?.at||0));
+  return out;
 }
+const chatMsgs = id => (data('msgs')||[]).filter(m=>m.chat===id).sort((a,b)=>(a.at||0)-(b.at||0));
+const myId = () => isTeacher() ? 'teacher' : S.session.id;
+const chatRead = id => (byId('notifread', myKey())?.chats||{})[id] || 0;
+const chatUnread = id => chatMsgs(id).filter(m=>m.from!==myId() && (m.at||0)>chatRead(id)).length;
+const unreadChats = () => chatList().reduce((a,c)=>a+c.unread,0);
+async function markChatRead(id){
+  const ms = chatMsgs(id); const last = ms[ms.length-1]; if(!last || (last.at||0)<=chatRead(id)) return;
+  const cur = byId('notifread', myKey()) || {};
+  try{ await S.db.collection('notifread').doc(myKey()).set({at:cur.at||0, chats:{...(cur.chats||{}), [id]:Math.max(Date.now(), last.at||0)}}); }catch(e){}
+}
+const timeOf = t => { const d = new Date(t); return pad(d.getHours())+':'+pad(d.getMinutes()); };
+const dayLabel = t => { const k = ymd(new Date(t)); const n = diffDays(k); return n===0?'Heute':n===-1?'Gestern':fmtLong(k); };
+const preview = m => !m ? 'Noch keine Nachrichten' : (m.text ? short(m.text,48) : (m.files?.length ? '📎 '+(m.files.length>1?m.files.length+' Dateien':m.files[0].name) : ''));
+const isImg = f => /^image\//.test(f.type||'') || /\.(png|jpe?g|gif|webp|heic)$/i.test(f.name||'');
+function chatAva(c){ return '<span class="ava" style="background:'+esc(c.color)+'">'+(c.group?ic('users'):esc(initials(c.name)))+'</span>'; }
+function vNachrichten(){
+  const list = chatList(); const cur = S.ui.chat;
+  const listHtml = '<div class="c-list">'+
+    '<div class="c-item news '+(cur==='news'?'on':'')+'" data-a="openChat" data-id="news"><span class="ava" style="background:#9ca3af">'+ic('bell')+'</span><div class="grow"><b>Klecks-Neuigkeiten</b><span class="tiny muted">'+esc(preview(myNotifs()[0]?{text:myNotifs()[0].text}:null))+'</span></div>'+(unread()?'<span class="c-badge">'+unread()+'</span>':'')+'</div>'+
+    (list.length ? list.map(c=>'<div class="c-item '+(cur===c.id?'on':'')+'" data-a="openChat" data-id="'+esc(c.id)+'">'+chatAva(c)+'<div class="grow"><div class="c-top"><b>'+esc(c.name)+'</b><span class="tiny muted">'+(c.lastMsg?(diffDays(ymd(new Date(c.lastMsg.at)))===0?timeOf(c.lastMsg.at):fmt(ymd(new Date(c.lastMsg.at)))):'')+'</span></div><span class="tiny muted c-prev">'+esc(c.lastMsg?((c.lastMsg.from===myId()?'Du: ':(c.group&&c.lastMsg.from!==myId()?(c.lastMsg.from==='teacher'?(set().teacherName||'Lehrkraft'):(c.lastMsg.fromName||'')).split(' ')[0]+': ':''))+preview(c.lastMsg)):c.sub)+'</span></div>'+(c.unread?'<span class="c-badge">'+c.unread+'</span>':'')+'</div>').join('') : '<p class="muted small" style="padding:14px">Noch keine Schüler.</p>')+'</div>';
+  let conv;
+  if(cur==='news'){
+    const ns = myNotifs(); const ra = readAt();
+    conv = '<div class="c-conv"><div class="c-head"><button class="btn flat icon c-back" data-a="closeChat" aria-label="Zurück">'+ic('back')+'</button><span class="ava" style="background:#9ca3af">'+ic('bell')+'</span><div class="grow"><b>Klecks-Neuigkeiten</b><span class="tiny muted">Hausaufgaben, Stunden, Erinnerungen</span></div></div><div class="c-msgs">'+
+      (ns.length?ns.slice().reverse().map(n=>'<div class="bub them sys'+(n.at>ra?' new':'')+'"><div style="white-space:pre-wrap">'+esc(n.text)+'</div><div class="b-meta">'+(n.link&&n.kind!=='msg'?'<a href="#'+esc(n.link)+'">öffnen</a> · ':'')+dayLabel(n.at)+', '+timeOf(n.at)+'</div></div>').join(''):'<div class="c-empty">Noch keine Neuigkeiten.</div>')+'</div></div>';
+  } else if(cur){
+    const c = list.find(x=>x.id===cur);
+    if(!c){ S.ui.chat = null; return vNachrichten(); }
+    const ms = chatMsgs(cur); let lastDay = '', lastFrom = '';
+    const body = ms.map(m=>{ const mine = m.from===myId(); const day = dayLabel(m.at||Date.now()); let h = '';
+      if(day!==lastDay){ h += '<div class="c-day"><span>'+day+'</span></div>'; lastDay = day; lastFrom = ''; }
+      const who = m.from==='teacher' ? (set().teacherName||'Lehrkraft') : (m.fromName || byId('students',m.from)?.name || '');
+      const showName = c.group && !mine && lastFrom!==m.from;
+      const canDel = isTeacher() || mine;
+      const imgs = (m.files||[]).filter(isImg), docs = (m.files||[]).filter(f=>!isImg(f));
+      h += '<div class="bub '+(mine?'me':'them')+(lastFrom===m.from?' cont':'')+'">'+(showName?'<div class="b-name" style="color:'+esc(m.from==='teacher'?'#2f6fed':(byId('students',m.from)?.color||'#8b5cf6'))+'">'+esc(who)+'</div>':'')+
+        (imgs.length?'<div class="b-imgs">'+imgs.map(f=>'<a href="#" data-a="openFile" data-p="'+esc(f.path)+'"><img class="lazy" data-path="'+esc(f.path)+'" alt="'+esc(f.name)+'"'+(S.chat.urls[f.path]?' src="'+esc(S.chat.urls[f.path].u)+'"':'')+'></a>').join('')+'</div>':'')+
+        (docs.length?'<div class="b-files">'+docs.map(f=>{ const [t,col] = ftype(f); return '<a class="file" href="#" data-a="openFile" data-p="'+esc(f.path)+'"><span class="ft" style="background:'+col+'">'+t+'</span><span>'+esc(f.name)+'</span></a>'; }).join('')+'</div>':'')+
+        (m.text?'<div class="b-text">'+linkify(esc(m.text))+'</div>':'')+
+        '<div class="b-meta">'+timeOf(m.at||Date.now())+(canDel?' <button class="b-del" data-a="delMsg" data-id="'+esc(m.id)+'" aria-label="Nachricht löschen">'+ic('trash')+'</button>':'')+'</div></div>';
+      lastFrom = m.from; return h; }).join('');
+    const pend = S.chat.pend[cur]||[];
+    conv = '<div class="c-conv"><div class="c-head"><button class="btn flat icon c-back" data-a="closeChat" aria-label="Zurück">'+ic('back')+'</button>'+chatAva(c)+'<div class="grow"><b>'+esc(c.name)+'</b><span class="tiny muted">'+esc(c.sub)+'</span></div></div>'+
+      '<div class="c-msgs" id="c-msgs">'+(body||'<div class="c-empty">Schreib die erste Nachricht – auch Fotos, PDFs und Arbeitsblätter gehen.</div>')+'</div>'+
+      (pend.length||S.chat.sending?'<div class="c-pend">'+pend.map((f,i)=>{ const [t,col] = ftype(f); return '<span class="file"><span class="ft" style="background:'+col+'">'+t+'</span><span>'+esc(f.name)+'</span><button type="button" class="btn flat sm icon" data-a="rmPend" data-i="'+i+'" aria-label="Entfernen">'+ic('x')+'</button></span>'; }).join('')+(S.chat.sending?'<span class="muted small">Lädt hoch …</span>':'')+'</div>':'')+
+      '<div class="c-comp"><label class="btn flat icon" aria-label="Datei anhängen" title="Foto, PDF oder Arbeitsblatt anhängen">'+ic('clip')+'<input type="file" data-a="chatUpload" multiple accept="image/*,application/pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt" hidden></label>'+
+      '<label class="btn flat icon c-cam" aria-label="Foto aufnehmen" title="Foto aufnehmen"><svg class="i" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><input type="file" data-a="chatUpload" accept="image/*" capture="environment" hidden></label>'+
+      '<textarea id="chat-in" rows="1" placeholder="Nachricht schreiben …" aria-label="Nachricht">'+esc(S.chat.draft[cur]||'')+'</textarea>'+
+      '<button class="btn primary icon c-send" data-a="chatSend" aria-label="Senden" '+(S.chat.sending?'disabled':'')+'>'+ic('send')+'</button></div></div>';
+  } else conv = '<div class="c-conv c-none"><div class="c-empty">'+appIcon('nachrichten')+'<b>Wähle einen Chat</b><span>'+(isTeacher()?'Schreib einem Kind allein oder der ganzen Gruppe.':'Schreib deiner Lehrkraft oder deiner Gruppe.')+'</span></div></div>';
+  return '<div class="chat '+(cur?'open':'')+'">'+listHtml+conv+'</div>';
+}
+const linkify = t => t.replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
+function afterChatRender(){
+  if(S.route!=='nachrichten') return;
+  const box = $('#c-msgs');
+  if(box){ const n = chatMsgs(S.ui.chat).length; if(S.chat.last!==S.ui.chat || n!==S.chat.n || S.chat.stick!==false) box.scrollTop = box.scrollHeight; S.chat.last = S.ui.chat; S.chat.n = n;
+    box.onscroll = () => { S.chat.stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60; }; }
+  const ta = $('#chat-in'); if(ta){ grow(ta); if(S.chat.focus){ ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } }
+  document.querySelectorAll('img.lazy').forEach(async img=>{ const p = img.dataset.path; const c = S.chat.urls[p];
+    if(c && c.t > Date.now()-50*60e3){ if(!img.src) img.src = c.u; return; }
+    try{ const u = await KD.fileUrl(p); S.chat.urls[p] = {u, t:Date.now()}; img.src = u; img.onload = () => { if(S.chat.stick!==false && box) box.scrollTop = box.scrollHeight; }; }catch(e){} });
+  if(S.ui.chat && S.ui.chat!=='news') markChatRead(S.ui.chat);
+  if(S.ui.chat==='news' && unread()) A.notifsSeen();
+}
+const grow = ta => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140)+'px'; };
 
 /* =====================================================================
    DATEIEN
@@ -566,14 +648,14 @@ function vNachrichten(){
 function vDateien(){
   const t = isTeacher(); const sid = t?null:S.session.id;
   const rows = [];
-  (t?data('entries'):entriesFor(sid)).forEach(e=>(e.files||[]).forEach(f=>rows.push({f, date:e.date, src:'Stunde: '+e.thema, faecher:entryFaecher(e)})));
-  (t?data('homework'):hwFor(sid)).forEach(h=>(h.files||[]).forEach(f=>rows.push({f, date:h.createdAt?ymd(new Date(h.createdAt)):h.due, src:'Hausaufgabe', faecher:[h.fach]})));
+  (t?data('entries'):entriesFor(sid)).forEach(e=>(e.files||[]).forEach(f=>rows.push({f, i:e.files.indexOf(f), col:'entries', id:e.id, date:e.date, src:'Stunde: '+e.thema, faecher:entryFaecher(e)})));
+  (t?data('homework'):hwFor(sid)).forEach(h=>(h.files||[]).forEach(f=>rows.push({f, i:h.files.indexOf(f), col:'homework', id:h.id, date:h.createdAt?ymd(new Date(h.createdAt)):h.due, src:'Hausaufgabe', faecher:[h.fach]})));
   rows.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
   const typeF = S.ui.ftype||'alle';
   const shown = rows.filter(r=>typeF==='alle' || ftype(r.f)[0]===typeF);
   return pageHead('dateien','Dateien','Alle Arbeitsblätter, Fotos und PDFs aus der Kursmappe und den Hausaufgaben.')+
     '<div class="filters"><div class="seg2">'+['alle','PDF','BILD'].map(x=>'<button class="'+(typeF===x?'on':'')+'" data-a="ftype" data-t="'+x+'">'+(x==='alle'?'Alle':x==='PDF'?'PDFs':'Bilder')+'</button>').join('')+'</div><span class="muted small">'+shown.length+' Dateien</span></div>'+
-    (shown.length?'<section class="card"><div class="list">'+shown.map(r=>{ const [ty,c] = ftype(r.f); return '<a class="li" href="#" data-a="openFile" data-p="'+esc(r.f.path||'')+'"><span class="file" style="padding:0;border:0;background:none"><span class="ft" style="background:'+c+'">'+ty+'</span></span><div class="grow"><b>'+esc(r.f.name)+'</b><span class="tiny muted">'+fmt(r.date)+' · '+esc(short(r.src,60))+'</span></div>'+r.faecher.map(fchip).join(' ')+'</a>'; }).join('')+'</div></section>'
+    (shown.length?'<section class="card"><div class="list">'+shown.map(r=>{ const [ty,c] = ftype(r.f); return '<a class="li" href="#" data-a="openFile" data-p="'+esc(r.f.path||'')+'"><span class="file" style="padding:0;border:0;background:none"><span class="ft" style="background:'+c+'">'+ty+'</span></span><div class="grow"><b>'+esc(r.f.name)+'</b><span class="tiny muted">'+fmt(r.date)+' · '+esc(short(r.src,60))+'</span></div>'+r.faecher.map(fchip).join(' ')+(isTeacher()?'<button class="btn flat sm icon" data-a="renameFile" data-c="'+r.col+'" data-id="'+esc(r.id)+'" data-i="'+r.i+'" aria-label="Umbenennen">'+ic('edit')+'</button>':'')+'</a>'; }).join('')+'</div></section>'
     :empty('Noch keine Dateien', t?'Hänge Arbeitsblätter an eine Stunde oder Hausaufgabe an.':'Arbeitsblätter erscheinen hier, sobald sie hochgeladen sind.'));
 }
 
@@ -638,10 +720,12 @@ function studPick(k, sel){
       '<div class="seg" style="margin-top:6px">'+list.map(s=>'<button type="button" class="'+(sel.includes(s.id)?'on':'')+'" data-a="multiToggle" data-k="'+k+'" data-v="'+esc(s.id)+'">'+ava(s,'xs')+esc(s.name)+'</button>').join('')+'</div></div>'; }).join('')+'</div>';
 }
 function filesEd(d){ if(!isTeacher()) return '';
-  return '<div class="files">'+(d.files||[]).map((f,i)=>{ const [t,c] = ftype(f); return '<span class="file"><span class="ft" style="background:'+c+'">'+t+'</span><span>'+esc(f.name)+'</span><button type="button" class="btn flat sm icon" data-a="rmFile" data-i="'+i+'" aria-label="Entfernen">'+ic('x')+'</button></span>'; }).join('')+
+  return '<div class="files">'+(d.files||[]).map((f,i)=>{ const [t,c] = ftype(f); return '<span class="file"><span class="ft" style="background:'+c+'">'+t+'</span><input class="inp fname" data-k="files.'+i+'.name" value="'+esc(f.name)+'" aria-label="Dateiname" title="Tippen zum Umbenennen">'+ic('edit','i fn-ic')+'<button type="button" class="btn flat sm icon" data-a="rmFile" data-i="'+i+'" aria-label="Entfernen">'+ic('x')+'</button></span>'; }).join('')+
     '<label class="btn ghost sm" style="cursor:pointer">'+ic('clip')+(d.uploading?'Lädt hoch …':'Datei anhängen')+'<input type="file" data-a="upload" accept="application/pdf,image/*,.doc,.docx,.txt" multiple hidden></label></div>'; }
 
 const M = {};
+M.rename = d => ({ title:'Datei umbenennen', body: fld('Neuer Name', inp('name', d.name, 'autofocus'), 'So wird die Datei überall angezeigt: in der Kursmappe, bei den Hausaufgaben und unter Dateien.'),
+  foot:'<button class="btn ghost" data-a="closeM">Abbrechen</button><button class="btn primary" data-a="saveRename">Speichern</button>' });
 M.confirm = d => ({ title:esc(d.title), body:'<p>'+esc(d.text)+'</p>', foot:'<button class="btn ghost" data-a="closeM">Abbrechen</button><button class="btn bad" data-a="confirmYes">'+esc(d.yes||'Löschen')+'</button>' });
 M.entry = d => ({ title: d.id?'Stunde bearbeiten':'Stunde eintragen', wide:true, body:
   '<div class="two">'+fld('Datum', inp('date', d.date, 'type="date"'))+fld('Fächer (mehrere möglich)', multiF('faecher', d.faecher, FAECHER))+'</div>'+
@@ -669,8 +753,6 @@ M.hwStudent = d => { const h = byId('homework',d.h), s = byId('students',d.s), s
   foot:'<button class="btn ghost" data-a="closeM">Schließen</button><button class="btn primary" data-a="saveFeedback">Rückmeldung senden</button>' }; };
 M.hwNote = d => ({ title:'Frage an '+esc(set().teacherName||'deine Lehrkraft'), body: fld('Was möchtest du sagen oder fragen?', ta('note', d.note, 'placeholder="z. B. Bei Aufgabe 2 komme ich nicht weiter." autofocus')),
   foot:'<button class="btn ghost" data-a="closeM">Abbrechen</button><button class="btn primary" data-a="saveNote">Senden</button>' });
-M.msg = d => ({ title:'Nachricht schreiben', body:(isTeacher()?fld('An', studPick('to', d.to)):'<p class="muted">An '+esc(set().teacherName||'deine Lehrkraft')+'</p>')+fld('Nachricht', ta('text', d.text, 'placeholder="Deine Nachricht …" autofocus')),
-  foot:'<button class="btn ghost" data-a="closeM">Abbrechen</button><button class="btn primary" data-a="sendMsg">'+ic('send')+'Senden</button>' });
 M.stud = d => ({ title: d.id?'Schüler bearbeiten':'Schüler anlegen', body:
   '<div class="two">'+fld('Name', inp('name', d.name, 'placeholder="Vorname (und Nachname)" autofocus'))+fld('Klasse', '<select class="inp" data-k="klasse">'+['5','6','7','8','9','10','11','12','13'].map(k=>'<option '+(d.klasse===k?'selected':'')+'>'+k+'</option>').join('')+'</select>')+'</div>'+
   fld('Gruppe', '<select class="inp" data-k="groupId"><option value="">Ohne Gruppe</option>'+groups().map(g=>'<option value="'+esc(g.id)+'" '+(d.groupId===g.id?'selected':'')+'>'+esc(g.name)+'</option>').join('')+'</select>')+
@@ -693,7 +775,7 @@ M.studDetail = d => { const s = byId('students',d.id); if(!s) return {title:'Sch
     '<div class="kpis" style="margin:0">'+kpi(h.done+'/'+h.total,'Hausaufgaben erledigt')+kpi(L.lv,'Level')+kpi(p.xp||0,'Punkte')+kpi(streak(p),'Tage in Folge')+'</div>'+
     '<div class="row" style="gap:6px"><span class="chip">Klasse '+esc(s.klasse)+'</span>'+(groupOf(s)?'<span class="chip f" style="background:'+esc(groupOf(s).color)+'">'+esc(groupOf(s).name)+'</span>':'')+(s.faecher||[]).map(fchip).join('')+'<span class="chip">'+ic('lock')+esc(s.username||'kein Zugang')+'</span></div>'+
     '<div class="grid2" style="gap:16px"><div><h3 style="margin-bottom:6px">Offene Hausaufgaben</h3>'+(openHw.length?'<div class="list">'+openHw.map(x=>'<div class="li"><span class="dot" style="background:var(--ok)"></span><div class="grow"><b>'+esc(short(x.text,60))+'</b><span class="tiny muted">bis '+rel(x.due)+'</span></div></div>').join('')+'</div>':'<p class="muted small">Alles erledigt.</p>')+
-    '<h3 style="margin:16px 0 6px">Klausuren & Noten</h3>'+(ex.length?'<div class="list">'+ex.map(e=>'<div class="li" data-a="examOpen" data-id="'+esc(e.id)+'" style="cursor:pointer">'+dbox(e.date,'#7c3aed')+'<div class="grow"><b>'+esc(e.fach==='Sonstiges'?short(e.themen,30):e.fach)+'</b><span class="tiny muted">'+esc(short(e.themen,50))+'</span></div>'+(e.note?'<b>'+esc(e.note)+'</b>':'<span class="chip">'+rel(e.date)+'</span>')+'</div>').join('')+'</div>':'<p class="muted small">Keine Klausuren.</p>')+'</div>'+
+    '<h3 style="margin:16px 0 6px">Klausuren & Noten</h3>'+(ex.length?'<div class="list">'+ex.map(e=>'<div class="li" data-a="examOpen" data-id="'+esc(e.id)+'" style="cursor:pointer">'+dbox(e.date,'#7c3aed')+'<div class="grow"><b>'+esc(examName(e))+'</b><span class="tiny muted">'+esc(short(e.themen,50))+'</span></div>'+(e.note?'<b>'+esc(e.note)+'</b>':'<span class="chip">'+rel(e.date)+'</span>')+'</div>').join('')+'</div>':'<p class="muted small">Keine Klausuren.</p>')+'</div>'+
     '<div><h3 style="margin-bottom:6px">Kurse</h3>'+(cs.length?'<div class="list">'+cs.map(c=>{ const max=(c.lessons||[]).length*3, got=courseStars(c,p); return '<div class="li"><span class="dbox" style="background:'+fcov(c.fach)+'"><b style="font-size:12px">'+esc(fg(c.fach))+'</b></span><div class="grow"><b>'+esc(c.title)+'</b><div class="bar sun" style="margin-top:5px"><i style="width:'+(max?got/max*100:0)+'%"></i></div></div><span class="tiny muted">'+got+'/'+max+'</span></div>'; }).join('')+'</div>':'<p class="muted small">Keine Kurse.</p>')+'</div></div>',
     foot:'<button class="btn ghost" data-a="newHwFor" data-id="'+esc(s.id)+'">'+ic('task')+'Hausaufgabe</button><button class="btn ghost" data-a="newMsgTo" data-id="'+esc(s.id)+'">'+ic('send')+'Nachricht</button><span class="sp"></span><button class="btn primary" data-a="editStud" data-id="'+esc(s.id)+'">'+ic('edit')+'Bearbeiten</button>' }; };
 M.exam = d => ({ title: d.id?'Klausur':'Klausur eintragen', body:
@@ -757,6 +839,7 @@ function getPath(o, path){ return path.split('.').reduce((t,k)=>t==null?t:t[k], 
 document.addEventListener('input', e => {
   const el = e.target;
   if(el.id==='q'){ S.ui.q = el.value; render(); return; }
+  if(el.id==='chat-in'){ S.chat.draft[S.ui.chat] = el.value; grow(el); return; }
   if(el.classList.contains('ln') || el.id==='p-in'){ pInput(el); return; }
   const k = el.dataset?.k; if(!k || !S.m) return;
   setPath(S.m.d, k, el.type==='checkbox' ? el.checked : el.type==='radio' ? Number(el.value) : el.value);
@@ -767,6 +850,7 @@ document.addEventListener('change', e => {
   if(el.dataset?.k && S.m && (el.type==='checkbox' || el.type==='radio' || el.tagName==='SELECT')){ setPath(S.m.d, el.dataset.k, el.type==='checkbox'?el.checked:el.type==='radio'?Number(el.value):el.value); if(el.dataset.rerender) rerenderM(); }
   if(el.dataset?.a==='studFilter'){ S.ui.stud = el.value; render(); }
   if(el.dataset?.a==='upload') upload(el.files);
+  if(el.dataset?.a==='chatUpload'){ chatUpload([...el.files]); el.value=''; }
 });
 async function upload(files){
   if(!files?.length) return; S.m.d.uploading = true; rerenderM();
@@ -893,6 +977,7 @@ function renderP(){
 }
 document.addEventListener('keydown', e => {
   if(e.key==='Escape'){ if(S.m) closeM(); else if(S.ui.q){ S.ui.q=''; render(); } return; }
+  if(e.key==='Enter' && e.target.id==='chat-in' && !e.shiftKey && !matchMedia('(pointer:coarse)').matches){ e.preventDefault(); A.chatSend(); return; }
   if(!S.p || e.key!=='Enter') return;
   if(e.target.id==='p-in' || e.target.classList?.contains('ln')){ e.preventDefault(); if(S.p.phase==='q' && canCheck()) checkAnswer(); else if(S.p.phase==='fb') pCont(); else if(e.target.classList.contains('ln')){ const n = e.target.parentElement.querySelector('.ln[data-g="'+(Number(e.target.dataset.g)+1)+'"]'); n?.focus(); } }
 });
@@ -926,6 +1011,22 @@ A.goKurse = () => { location.hash = 'kurse'; };
 A.segSet = el => { const k = el.dataset.k; if(k.endsWith('.type') && getPath(S.m.d,k)!==el.dataset.v){ const base = k.replace(/\.type$/,''); setPath(S.m.d, base+'.answer', el.dataset.v==='mc'?0:''); } setPath(S.m.d, k, el.dataset.v); rerenderM(); };
 A.multiToggle = el => { const k = el.dataset.k, v = el.dataset.v; const arr = getPath(S.m.d,k) || []; setPath(S.m.d, k, arr.includes(v) ? arr.filter(x=>x!==v) : [...arr, v]); rerenderM(); };
 A.multiGroup = el => { const k = el.dataset.k; const ids = el.dataset.ids.split(','); const arr = getPath(S.m.d,k)||[]; const all = ids.every(id=>arr.includes(id)); setPath(S.m.d, k, all ? arr.filter(x=>!ids.includes(x)) : [...new Set([...arr, ...ids])]); rerenderM(); };
+A.renameFile = (el, ev) => { ev.stopPropagation(); const doc = byId(el.dataset.c, el.dataset.id); const f = doc?.files?.[Number(el.dataset.i)]; if(f) openM('rename', {c:el.dataset.c, id:el.dataset.id, i:Number(el.dataset.i), name:f.name}); };
+A.saveRename = async () => { const d = S.m.d; const name = String(d.name||'').trim(); if(!name) return toast('Bitte einen Namen eingeben.');
+  const doc = byId(d.c, d.id); if(!doc) return closeM(); const path = doc.files?.[d.i]?.path;
+  if(await syncNames({[path]:name})){ closeM(); toast('Umbenannt – überall aktualisiert'); } };
+/* Gleicher Dateiname überall: Kursmappe, Hausaufgaben, Nachrichten */
+async function syncNames(map){
+  const paths = Object.keys(map).filter(Boolean); if(!paths.length) return true;
+  for(const c of ['entries','homework','msgs']){
+    for(const doc of (data(c)||[])){
+      if(!(doc.files||[]).some(f=>paths.includes(f.path) && f.name!==map[f.path])) continue;
+      const files = doc.files.map(f=>paths.includes(f.path) ? {...f, name:map[f.path]} : f);
+      if(!await save(c, doc.id, {...strip(doc), files})) return false;
+    }
+  }
+  return true;
+}
 A.rmFile = el => { S.m.d.files.splice(Number(el.dataset.i),1); rerenderM(); };
 A.confirmYes = async () => { const fn = S.m.d.onYes; closeM(); if(fn) await fn(); };
 function ask(title, text, onYes, yes){ openM('confirm', {title, text, onYes, yes}); }
@@ -942,11 +1043,10 @@ A.saveEntry = async () => {
   const d = S.m.d;
   if(!d.thema.trim()) return toast('Bitte ein Thema eintragen.');
   if(!d.studentIds.length) return toast('Bitte mindestens einen Schüler auswählen.');
-  if(!d.faecher.length) d.faecher = ['Sonstiges'];
   const per = d.hwOn && d.hwPer && d.studentIds.length>1;
   if(d.hwOn && !per && !String(d.hwText||'').trim()) return toast('Bitte die Hausaufgabe beschreiben.');
   if(per){ const miss = d.studentIds.find(id=>!String((d.hwTexts||{})[id]||'').trim()); if(miss) return toast('Bitte die Aufgabe für '+byId('students',miss)?.name+' eintragen.'); }
-  const id = d.id || uid(); const isNew = !d.id; const hwFach = d.faecher.length===1 ? d.faecher[0] : 'Sonstiges';
+  const id = d.id || uid(); const isNew = !d.id; const hwFach = d.faecher[0] || '';
   const old = (d.oldHw||[]).map(h=>byId('homework',h)).filter(Boolean);
   const want = !d.hwOn ? [] : per ? d.studentIds.map(sid=>({ids:[sid], text:d.hwTexts[sid].trim()})) : [{ids:d.studentIds, text:d.hwText.trim()}];
   const used = new Set(), hwIds = [];
@@ -955,7 +1055,8 @@ A.saveEntry = async () => {
     hwIds.push(hid); await notifyMany(w.ids.filter(x=>!(reuse?.studentIds||[]).includes(x)), 'Neue Hausaufgabe bis '+fmt(d.hwDue), 'aufgaben', 'hw'); }
   for(const h of old) if(!used.has(h.id)) await del('homework', h.id);
   const att = {}; d.studentIds.forEach(sid=>att[sid] = d.attendance?.[sid]||'da');
-  if(!await save('entries', id, {date:d.date||today(), fach:d.faecher[0], faecher:d.faecher, studentIds:d.studentIds, thema:d.thema.trim(), inhalt:d.inhalt.trim(), files:d.files||[], attendance:att, hwIds, createdAt:d.createdAt||Date.now()})) return;
+  if(!await save('entries', id, {date:d.date||today(), fach:d.faecher[0]||'', faecher:d.faecher, studentIds:d.studentIds, thema:d.thema.trim(), inhalt:d.inhalt.trim(), files:(d.files||[]).map(f=>({...f, name:String(f.name||'').trim()||'Datei'})), attendance:att, hwIds, createdAt:d.createdAt||Date.now()})) return;
+  await syncNames(Object.fromEntries((d.files||[]).map(f=>[f.path, String(f.name||'').trim()||'Datei'])));
   if(isNew) await notifyMany(d.studentIds, 'Neue Stunde in der Kursmappe: '+d.thema.trim(), 'kursmappe', 'entry');
   closeM(); toast('Stunde gespeichert');
 };
@@ -972,7 +1073,8 @@ A.saveHw = async () => { const d = S.m.d;
     closeM(); toast(d.studentIds.length+' Hausaufgaben verteilt'); return; }
   if(!String(d.text||'').trim()) return toast('Bitte die Aufgabe beschreiben.');
   const id = d.id || uid(); const prev = d.id ? byId('homework', d.id) : null;
-  if(!await save('homework', id, {fach:d.fach, studentIds:d.studentIds, text:d.text.trim(), due:d.due||addDays(today(),7), files:d.files||[], entryId:d.entryId||null, createdAt:d.createdAt||Date.now()})) return;
+  if(!await save('homework', id, {fach:d.fach, studentIds:d.studentIds, text:d.text.trim(), due:d.due||addDays(today(),7), files:(d.files||[]).map(f=>({...f, name:String(f.name||'').trim()||'Datei'})), entryId:d.entryId||null, createdAt:d.createdAt||Date.now()})) return;
+  await syncNames(Object.fromEntries((d.files||[]).map(f=>[f.path, String(f.name||'').trim()||'Datei'])));
   await notifyMany(d.studentIds.filter(x=>!(prev?.studentIds||[]).includes(x)), 'Neue Hausaufgabe bis '+fmt(d.due), 'aufgaben', 'hw');
   closeM(); toast('Hausaufgabe gespeichert'); };
 A.delHw = () => { const d = S.m.d; ask('Hausaufgabe löschen?', 'Die Hausaufgabe und alle Häkchen dazu werden gelöscht.', async()=>{ if(await del('homework', d.id)){ for(const sid of d.studentIds) await del('hwstatus', d.id+'__'+sid); const e = data('entries').find(x=>hwIdsOf(x).includes(d.id)); if(e){ const c = strip(e); delete c.hwId; c.hwIds = hwIdsOf(e).filter(x=>x!==d.id); await save('entries', e.id, c); } toast('Gelöscht'); } }); };
@@ -987,12 +1089,26 @@ A.saveFeedback = async () => { const d = S.m.d; const st = stOf(d.h,d.s)||{};
   if(await save('hwstatus', d.h+'__'+d.s, {...strip(st), hwId:d.h, studentId:d.s, done:!!st.done, at:st.at||Date.now(), feedback:d.feedback.trim(), fbAt:Date.now()})){ if(d.feedback.trim()) notify(d.s, 'Rückmeldung zu deiner Hausaufgabe: „'+short(d.feedback,80)+'“', 'aufgaben', 'msg'); closeM(); toast('Rückmeldung gesendet'); } };
 
 /* Nachrichten */
-A.newMsg = () => openM('msg', {to:[], text:''});
-A.newMsgTo = el => openM('msg', {to:[el.dataset.id], text:''});
-A.sendMsg = async () => { const d = S.m.d; const txt = String(d.text||'').trim(); if(!txt) return toast('Bitte eine Nachricht schreiben.');
-  if(isTeacher()){ if(!d.to.length) return toast('Bitte Empfänger auswählen.'); for(const sid of d.to) await notify(sid, txt, 'nachrichten', 'msg'); }
-  else await notify('teacher', me().name+': '+txt, 'nachrichten', 'msg', {from:S.session.id});
-  closeM(); toast('Nachricht gesendet'); };
+A.newMsg = () => { S.ui.chat = isTeacher() ? null : 's:'+S.session.id; location.hash = 'nachrichten'; render(); };
+A.newMsgTo = el => { closeM(); S.ui.chat = 's:'+el.dataset.id; if(S.route==='nachrichten') render(); else location.hash = 'nachrichten'; };
+A.openChat = el => { S.ui.chat = el.dataset.id; S.chat.stick = true; S.chat.last = null; render(); };
+A.closeChat = () => { S.ui.chat = null; render(); };
+A.notifsSeen = async () => { try{ const cur = byId('notifread', myKey())||{}; await S.db.collection('notifread').doc(myKey()).set({...strip(cur), at:Date.now()}); }catch(e){} };
+A.rmPend = el => { (S.chat.pend[S.ui.chat]||[]).splice(Number(el.dataset.i),1); render(); };
+A.chatSend = async () => { const id = S.ui.chat; if(!id || S.chat.sending) return;
+  const text = String(S.chat.draft[id]||'').trim(); const files = S.chat.pend[id]||[];
+  if(!text && !files.length) return;
+  S.chat.sending = true; render();
+  const ok = await save('msgs', uid(), {chat:id, from:myId(), text, files, at:Date.now()});
+  S.chat.sending = false;
+  if(ok){ S.chat.draft[id] = ''; S.chat.pend[id] = []; S.chat.stick = true; S.chat.focus = true; }
+  render(); };
+A.delMsg = el => { const m = byId('msgs', el.dataset.id); if(!m) return; ask('Nachricht löschen?', 'Die Nachricht wird für alle gelöscht.', async()=>{ if(await del('msgs', m.id)) toast('Gelöscht'); }, 'Löschen'); };
+async function chatUpload(files){
+  const id = S.ui.chat; if(!id || !files?.length) return; S.chat.sending = true; render();
+  for(const f of files){ if(f.size > 20*1024*1024){ toast(f.name+' ist größer als 20 MB.'); continue; } try{ (S.chat.pend[id] ||= []).push(await KD.uploadFile(f)); }catch(e){ toast('Upload fehlgeschlagen: '+f.name); } }
+  S.chat.sending = false; render();
+}
 
 /* Schüler & Gruppen */
 A.newStud = el => openM('stud', {name:'', klasse:'5', schule:'', groupId:el?.dataset?.g || '', faecher:['Mathe','Deutsch'], username:'', pw:genPw(), color:COLORS[students().length % COLORS.length]});
@@ -1009,6 +1125,7 @@ A.saveStud = async () => { const d = S.m.d;
   if(!id){ const r = await KD.manageUser({action:'create', username:u, password:d.pw}); if(r.error) return toast(r.error); id = r.uid; }
   else if(d.pw || old?.username!==u){ const r = await KD.manageUser({action:'update', uid:id, username: old?.username!==u ? u : '', password:d.pw||''}); if(r.error) return toast(r.error); }
   if(!await save('students', id, {name, username:u, klasse:d.klasse, schule:d.schule.trim(), groupId:d.groupId||'', faecher:d.faecher, color:d.color, createdAt:d.createdAt||Date.now()})) return;
+  await syncGroups();
   if(d.pw) openM('creds', {name, username:u, pw:d.pw}); else { closeM(); toast('Gespeichert'); } };
 A.copyCreds = async () => { const d = S.m.d; try{ await navigator.clipboard.writeText('Klecks – Zugang für '+d.name+'\nAdresse: '+location.href.split('#')[0]+'\nBenutzername: '+d.username+'\nPasswort: '+d.pw); toast('Kopiert'); }catch(e){ toast('Kopieren nicht möglich – bitte abschreiben.'); } };
 A.delStud = () => { const d = S.m.d; ask(d.name+' löschen?', 'Profil, Zugang, Lernfortschritt und Klausuren werden gelöscht. Einträge in der Kursmappe bleiben.', async()=>{ const r = await KD.manageUser({action:'delete', uid:d.id}); if(r.error) return toast(r.error); await del('students', d.id); await del('progress', d.id); for(const e of examsFor(d.id)) await del('exams', e.id); toast('Gelöscht'); }); };
@@ -1016,7 +1133,7 @@ A.studDetail = el => { S.ui.q=''; openM('studDetail', {id:el.dataset.id}); };
 A.newGroup = () => openM('group', {name:'', note:'', color:COLORS[groups().length % COLORS.length], members:[]});
 A.editGroup = el => { const g = byId('groups', el.dataset.id); openM('group', {id:g.id, name:g.name, note:g.note||'', color:g.color, members:students().filter(s=>s.groupId===g.id).map(s=>s.id), createdAt:g.createdAt}); };
 A.saveGroup = async () => { const d = S.m.d; if(!d.name.trim()) return toast('Bitte einen Namen eingeben.'); const id = d.id || uid();
-  if(!await save('groups', id, {name:d.name.trim(), note:(d.note||'').trim(), color:d.color, createdAt:d.createdAt||Date.now()})) return;
+  if(!await save('groups', id, {name:d.name.trim(), note:(d.note||'').trim(), color:d.color, memberIds:d.members, createdAt:d.createdAt||Date.now()})) return;
   for(const s of students()){ const inG = d.members.includes(s.id); if(inG && s.groupId!==id) await save('students', s.id, {...strip(s), groupId:id}); if(!inG && s.groupId===id) await save('students', s.id, {...strip(s), groupId:''}); }
   closeM(); toast(d.id?'Gespeichert':'Gruppe angelegt'); };
 A.delGroup = () => { const d = S.m.d; ask('Gruppe „'+d.name+'“ löschen?', 'Die Schüler bleiben erhalten.', async()=>{ if(await del('groups', d.id)){ for(const s of students().filter(x=>x.groupId===d.id)) await save('students', s.id, {...strip(s), groupId:''}); toast('Gelöscht'); } }); };
@@ -1097,7 +1214,7 @@ document.addEventListener('click', ev => {
   if(same && same.getAttribute('href')===location.hash && !same.dataset.a){ S.ui.course = null; S.ui.q=''; render(); window.scrollTo(0,0); return; }
   if(S.ui.q && !ev.target.closest('.search')){ S.ui.q = ''; if(!ev.target.closest('[data-a]')) { render(); return; } }
   const el = ev.target.closest('[data-a]'); if(!el) return;
-  const a = el.dataset.a; if(a==='upload' || a==='studFilter') return;
+  const a = el.dataset.a; if(a==='upload' || a==='studFilter' || a==='chatUpload') return;
   if(!A[a]) return;
   if(el.tagName==='BUTTON' || (el.tagName==='A' && el.getAttribute('href')==='#')) ev.preventDefault();
   if(a==='closeM' && el.tagName==='A'){ closeM(); return; }
